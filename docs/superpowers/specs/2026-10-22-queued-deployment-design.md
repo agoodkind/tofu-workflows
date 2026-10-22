@@ -2,6 +2,8 @@
 
 Provide reusable GitHub Actions workflows that show deployment changes on every pull request update and deploy merged releases automatically. Each release completes QA, production, or verified recovery before another release starts.
 
+Use the [implementation contracts](../plans/2026-10-22-deployment-contracts.md) for exact dependency revisions, permission boundaries, queue records, and recovery transitions.
+
 ## Define the project boundary
 
 Keep the shared implementation in the public `agoodkind/tofu-workflows` repository. Accept caller configuration for projects, environments, OpenTofu roots, state backends, release inputs, checks, and credentials. Do not embed application names, host addresses, resource types, or database engines in the shared workflow.
@@ -16,13 +18,16 @@ Implement shared automation independently from application provider resources. A
 
 Each consumer supplies a deployment set with two ordered environments: validation and production. Consumers choose the display labels, such as QA. A deployment set identifies resources that must not change concurrently. Separate deployment sets may run independently only when their state and managed resources do not overlap.
 
+Supply an independent configuration root, backend identity, and existing CLI workspace for each environment. A child module directory does not establish separate state. Do not infer isolation from directory names or use resource targeting to hide unrelated infrastructure in an application apply.
+
 Require these consumer inputs:
 
 | Input | Required behavior |
 | --- | --- |
 | Source repository and deployment branch | Identify the repository and branch that authorize release creation. |
 | Initial commit | Identify the last release already installed before queue processing starts. Verify that baseline before enabling applies. |
-| Configuration revision and root | Select an exact OpenTofu configuration revision and root directory. |
+| Configuration revision and root | Select the exact configuration revision and root for each environment. |
+| Backend identity and CLI workspace | Identify the state that an apply can change and reject duplicate ownership. |
 | OpenTofu version and provider lock file | Use identical tool and provider versions for a plan and its apply. |
 | Environment settings | Select the state backend, variable files, credential environment, and health checks for each environment. |
 | Release values | Identify exact application artifacts with immutable digests and typed nonsecret variables. |
@@ -35,7 +40,7 @@ Treat paths and references as data. Do not accept arbitrary shell text as a work
 
 ## Plan every pull request revision
 
-Start a plan for every commit pushed to an open PR. Plan every configured environment against its current managed state. Planning must not change deployed resources. OpenTofu may use its normal backend locking protocol.
+Start a plan for every commit pushed to an open PR. Plan every configured environment against its current managed state. Planning must not change deployed resources. Apply must use the backend lock.
 
 Different PRs may run plans and tests independently. Shared QA must not become a reservation that blocks PR validation. Run upgrade and recovery tests on GitHub-hosted runners with real temporary dependencies and synthetic data.
 
@@ -63,9 +68,9 @@ Use GitHub workflow concurrency to exclude simultaneous deployment sequences. Ke
 
 The Go queue component must select the oldest unfinished release while it owns the deployment concurrency group. A trigger for a later commit may process that earlier release. Resolve its source, artifact digests, checks, and PR from the selected release rather than from the triggering event. If the earliest release is still building, do not skip it to deploy a newer release.
 
-Use [GitHub deployment records](https://docs.github.com/en/rest/deployments/deployments) and their statuses to record each release attempt, environment, configuration revision, artifact digests, run URL, and recovery attempt. Store deployment metadata only. Preserve the distinction between a successful release and a failed release with successful recovery.
+Use [GitHub deployment records](https://docs.github.com/en/rest/deployments/deployments) for verified release manifests, pre-mutation attempts, and final receipts. Store exact source/configuration identities, artifact digests, nonsecret release values, run references, and observed outcomes. Retain enough metadata to resume after a build artifact or historical status expires. A recovered release still has a failed deployment result.
 
-Reconcile branch history with deployment records when a build completes, a deployment completes, a run is retried, or an operator requests reconciliation. Include a scheduled reconciliation in the consumer workflow to recover missing triggers. A finite native queue must not silently discard a release from the logical queue.
+Reconcile branch history with deployment records when a producer completes, a run is retried, or an operator requests reconciliation. After completing a release, explicitly dispatch the next ready release. Include a scheduled reconciliation to recover missing triggers. Do not depend on token-generated deployment events to start another workflow. A finite native queue must not silently discard a release from the logical queue.
 
 After interruption, compare recorded attempts with actual managed state and checks before deciding whether to resume an apply or recover. Keep later releases waiting while the outcome remains unknown. Do not force-unlock OpenTofu state automatically.
 
@@ -90,7 +95,7 @@ For QA followed by production, a failed QA apply or health check prevents the pr
 
 Before changing an environment, identify its previous verified application release and the information required to restore it. Require upgrade tests to prove that the previous application remains compatible with database changes in the candidate release.
 
-On apply or health-check failure, read the actual managed state. Restore the previous application release through declared resource changes when that recovery remains compatible. Preserve committed database changes and audit history. Do not restore an entire database snapshot, reverse migrations, delete application data, or rewrite Git history as an automatic recovery action.
+On apply or health-check failure, read actual managed state. Use the candidate configuration and restore only the declared application-release variables from the previous verified release. Validate a separate recovery plan against permitted and protected resource addresses. Never recover by applying the entire older configuration. Preserve committed database changes and audit history. Do not restore an entire database snapshot, reverse migrations, delete application data, or rewrite Git history as an automatic recovery action.
 
 Check the recovered release before reporting recovery success. Record the original release as failed even when recovery succeeds. Continue to the next queued release only after the environment has a verified working state. If recovery fails or compatibility cannot be established, stop that deployment set and report the specific failure. Other independent deployment sets may continue.
 
@@ -100,7 +105,7 @@ A missing artifact or failing check before mutation does not require a recovery 
 
 Store generated deployment credentials in each consuming repository's protected GitHub environment secrets. Restrict apply credentials to workflows authorized from the deployment branch. Keep application and database passwords on the service hosts. Never copy them into the shared workflow repository.
 
-Planning requires separate credentials that permit only the resource reads necessary to calculate a plan and the backend's locking protocol. Give PR reporting only the GitHub permissions needed to update the relevant comments and checks. Do not give PR test code deployment credentials or unrestricted production access.
+Planning requires separate credentials that permit only the resource reads necessary to calculate a plan. Give PR reporting only the GitHub permissions needed to update the relevant comments and checks. Do not give PR test code deployment credentials or unrestricted production access.
 
 Run PR builds and tests without production credentials. A protected workflow reads the resulting release manifest as data and uses an approved configuration revision and pinned providers for live planning. It must not execute PR scripts, PR workflow definitions, or provider binaries from the PR with live credentials. Validate artifact provenance, source commit, variable names and types, and image digests before planning. Reject a manifest that attempts to change the trusted configuration revision, check executable, or provider selection.
 
@@ -110,7 +115,7 @@ The later credential-lockdown project must prevent coding agents from reading se
 
 ## Verify the shared behavior
 
-Use real GitHub workflow runs in a test consumer repository and a small real OpenTofu configuration. The fixture must produce an observable resource change, a health-check failure, and a recoverable application version change without production credentials or data.
+Use real GitHub workflow runs in a test consumer repository and a small real OpenTofu configuration. The fixture must produce an observable managed release change, a check failure, and a recoverable version change without production credentials or data. Persist synthetic resources through a real remote provider between ephemeral runners, and separately test the container-check adapter on a runner. Generic fixture success does not establish Tack runtime correctness.
 
 Acceptance must establish:
 
