@@ -23,6 +23,8 @@ The inspected [plan entry point](https://github.com/dflook/terraform-github-acti
 
 Require a nonempty existing `plan_path`. Pass that exact file to apply in the same job. Never fall back to an implicit plan inside apply. Reject backends that cannot produce a local saved plan.
 
+The [disposable GitHub validation run](https://github.com/agoodkind/tofu-workflows/actions/runs/39814524494) passed checks for plan outputs, sensitive fixture redaction, exact saved-plan apply, and stale-plan rejection at source revision `7d546a5976e526f3dbe0f2e6179fa9d8a1684ab2`. It used only local OpenTofu resources on the GitHub runner. This establishes those upstream action behaviors; the queue, protected-environment integration, and application recovery still require the implementation acceptance tests below.
+
 ## Define workspace and release inputs
 
 Distinguish a configuration root with its own backend from a named OpenTofu CLI workspace inside that root. Supply both explicitly. Require the CLI workspace to exist before deployment.
