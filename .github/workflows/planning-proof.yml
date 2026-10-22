@@ -1,0 +1,65 @@
+name: Upstream OpenTofu contract proof
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      OPENTOFU_VERSION: 1.13.2
+      GITHUB_DOT_COM_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Generate the saved plan
+        id: plan
+        uses: dflook/tofu-plan@53b5b01b6eef56cd678401dbe92a0f6ca6b863ff
+        with:
+          path: proof/config
+          add_github_comment: false
+      - name: Verify plan outputs and redaction
+        run: go test ./proof -run '^TestPlan$' -count=1
+        env:
+          PLAN_CHANGED: ${{ steps.plan.outputs.changes }}
+          PLAN_BINARY: ${{ github.workspace }}/${{ steps.plan.outputs.plan_path }}
+          PLAN_JSON: ${{ github.workspace }}/${{ steps.plan.outputs.json_plan_path }}
+          PLAN_TEXT: ${{ github.workspace }}/${{ steps.plan.outputs.text_plan_path }}
+      - name: Generate another plan against the original state
+        id: earlier
+        uses: dflook/tofu-plan@53b5b01b6eef56cd678401dbe92a0f6ca6b863ff
+        with:
+          path: proof/config
+          add_github_comment: false
+      - name: Apply the first saved plan
+        id: apply
+        uses: dflook/tofu-apply@1de081df5087fb9ba2acf4866e9bc9b95f79676c
+        with:
+          path: proof/config
+          plan_path: ${{ steps.plan.outputs.plan_path }}
+          auto_approve: true
+      - name: Verify the applied resource
+        run: go test ./proof -run '^TestApply$' -count=1
+        env:
+          APPLY_OUTPUT: ${{ github.workspace }}/${{ steps.apply.outputs.json_output_path }}
+      - name: Attempt the stale saved plan
+        id: stale
+        continue-on-error: true
+        uses: dflook/tofu-apply@1de081df5087fb9ba2acf4866e9bc9b95f79676c
+        with:
+          path: proof/config
+          plan_path: ${{ steps.earlier.outputs.plan_path }}
+          auto_approve: true
+      - name: Verify stale-plan rejection
+        run: go test ./proof -run '^TestStalePlan$' -count=1
+        env:
+          STALE_OUTCOME: ${{ steps.stale.outcome }}
+          STALE_REASON: ${{ steps.stale.outputs.failure_reason }}
