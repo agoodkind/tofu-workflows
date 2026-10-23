@@ -142,7 +142,7 @@ Create the consumer schema and command boundary before writing workflow jobs. Ke
 - [ ] For validation, create a fresh plan for that exact release, report it, and apply its saved plan with dflook. Configure `auto_approve` for the accepted merge authorization rather than comparing against the older PR preview.
 - [ ] Verify installed artifacts and runtime behavior, then record the result.
 - [ ] Pass the environment's `Parallelism` value to apply and recovery. Preserve the resource ordering required by the consumer.
-- [ ] Execute production only after validation success. Use production's own backend, plan, credentials, and checks.
+- [ ] Execute production only after validation success. Use production's own backend, plan, credentials, and checks. Set each environment job's `timeout-minutes` from its validated protected `JobTimeoutMinutes` and reject credentials that expire before that limit plus fifteen minutes.
 - [ ] On a mutation or health failure, inspect actual state, evaluate recovery, plan the previous compatible application values, apply that recovery plan, and check the restored service.
 - [ ] Keep original failure and recovery results distinct. Stop the deployment set when recovery fails or actual state cannot be established.
 - [ ] Enforce the observation transition table after interruption. An apply error cannot establish that mutation did not occur.

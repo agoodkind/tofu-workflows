@@ -115,6 +115,8 @@ The remaining choice changes Task 6's storage configuration:
 1. Use a separate state bucket for QA and production with a permanent credential restricted to each bucket. Preserve the selected state filenames and encryption. This avoids a credential issuer.
 2. Keep the shared bucket and install a fixed Go credential issuer on an existing protected host. The issuer authenticates each planning or applying identity and returns only its short-lived session. It exits after each request and does not require another daemon or container.
 
+Separate buckets require four user-owned R2 tokens: one read-only planning token and one applying token per environment. The supplied mint-only capability supports this route. Complete bucket creation and other control-plane operations, then revoke their temporary provisioning token before creating the final four identities. The disposable proof verified that this sequence fits the current user-token quota without deleting unrelated credentials. Check total records, including expired tokens, before beginning final provisioning.
+
 Recommend the separate buckets for the smaller implementation. The current plan does not select either option until the user answers this choice. Do not treat temporary test credentials as an unattended deployment credential system.
 
 ## Implement the approved design

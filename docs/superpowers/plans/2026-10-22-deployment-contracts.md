@@ -49,6 +49,7 @@ type Environment struct {
     BackendFile string
     StateID string
     Parallelism int
+    JobTimeoutMinutes int
     AccessTunnels []AccessTunnel
     HostLocks []HostLockTarget
     VariableFiles []string
@@ -149,7 +150,7 @@ Trusted check containers share only the supervisor's network namespace to use th
 
 An OpenTofu backend lock excludes other users of that state. It does not exclude an infrastructure or guest deployment using different state. Consumers with existing host locks must configure every affected guest and hypervisor in `HostLocks`. A `configsctl.yml` declaration alone does not acquire them when dflook runs directly.
 
-Install an administrator-owned fixed Go command in configsctl, `host-lock serve --principal ID`. SSH configuration supplies the principal and fixed command, disables shell/file transfer/forwarding, and permits only the protected host. Accept one JSON request of at most 4 KiB with `protocol_version`, `operation`, `run_id`, and `lease_seconds`. Accept `acquire`, `renew`, `release`, and `extend`; reject duplicate or unknown fields, caller-selected paths, and leases outside one through nine hundred seconds. Prefix stored run identities with the server's principal. The caller cannot renew or release another principal's lock.
+Install an administrator-owned fixed Go command in configsctl, `host-lock serve --principal ID`. SSH configuration supplies the principal and fixed command, disables shell/file transfer/forwarding, and permits only the protected host. Accept one JSON request of at most 4 KiB with `protocol_version`, `operation`, `run_id`, and `lease_seconds`. Accept `acquire`, `renew`, `release`, and `extend`; reject duplicate or unknown fields and caller-selected paths. Permit acquire/renew leases from one through 4200 seconds and extend requests from one through 900 seconds. Prefix stored run identities with the server's principal. The caller cannot renew or release another principal's lock.
 
 Reuse the [existing configsctl lock protocol](https://github.com/agoodkind/configsctl/blob/26c05c9064ae273657d9d3a666d28f75a6f31711/internal/hostlock/lock.sh): the fixed lock file, boot-specific atomic directory guard, three-field record, expiry rules, and matching-owner release. Reject symlink paths, malformed records, and nonempty stale guards without deleting their contents. Return bounded status codes plus the host time and expiry. Local disposable interoperability tests established that the unchanged client and a fixed Go helper exclude each other.
 
@@ -157,7 +158,7 @@ Define `LeaseSet.AcquireAll(ctx context.Context, targets []config.HostLockTarget
 
 Use a single environment-execution Docker action derived from the pinned dflook runtime image. Its Go supervisor starts the existing upstream plan/apply entrypoints, reports the plan, records intent, checks results, and performs recovery within one lock lifetime. Preserve upstream inputs, saved-plan paths, and GitHub output handling. Do not add a separate deployment controller or new shell scripts.
 
-Acquire and renew nine-hundred-second leases every sixty seconds. Bound each renewal request to ten seconds. Cancel supervised work on the first failed renewal. The longest permitted guest command takes six hundred seconds plus thirty seconds of polling margin and five seconds for remote termination; it fits inside the remaining lease after a failed renewal. Keep the legacy client's defaults unchanged. Reject a consumer operation that exceeds this lease budget before execution.
+Acquire and renew 4200-second leases every sixty seconds. Bound each renewal request to ten seconds. Cancel supervised work on the first failed renewal. Tack's existing migration command permits 3600 seconds, plus thirty seconds of polling margin and five seconds for remote termination. It fits inside the 4130 seconds remaining after a failed renewal. Keep the legacy client's defaults unchanged. Its 900-second cap applies only to extend, and its renew preserves a later expiry. Never share the supervisor's run identity with a legacy acquire at a shorter duration, which could shorten that expiry. Reject a configured remote operation that exceeds the lease budget before execution.
 
 Hold host locks from the fresh deployment plan through apply, verification, and recovery. A local child-process exit does not prove that remote work stopped. Release early only after remote completion; otherwise leave the recorded lease to expire and inspect before the next mutation. Committed graceful shutdown may continue completing admitted requests after expiry. Inspect its phase and refuse another replacement until that shutdown finishes. Read-only PR previews do not acquire deployment host locks.
 
@@ -191,7 +192,7 @@ Pending builds return `waiting`. A terminal build failure produces an explicit f
 
 After a terminal receipt, use `workflow_dispatch` on the protected consumer branch when another ready release exists. GitHub permits that event with `GITHUB_TOKEN`; ordinary token-generated `deployment_status` events cannot be the continuation mechanism. Producer completion and a 15-minute reconciliation schedule also request work. Do not repeatedly self-dispatch while waiting for builds or while stopped.
 
-Retry transient API reads at most three times and honor `Retry-After`. Read back failed writes before retrying them. Initially allow 10 minutes for inspection and 60 minutes for an environment apply job. Consumers may select larger bounded limits in protected configuration after acceptance establishes the need.
+Retry transient API reads at most three times and honor `Retry-After`. Read back failed writes before retrying them. Allow 10 minutes for inspection. Require protected `JobTimeoutMinutes` from one through 180 and use it as the reusable job's `timeout-minutes`. Use 60 for generic acceptance and 120 for Tack, which must permit its existing one-hour migration plus downloads, checks, and recovery. The selector must validate this value before publishing the job definition. Credential validity must exceed the full configured job limit by at least fifteen minutes.
 
 ## Apply and recover safely
 

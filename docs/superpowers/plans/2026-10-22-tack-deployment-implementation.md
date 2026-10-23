@@ -65,7 +65,16 @@ type Observation struct {
     Schema *SchemaObservation
     AuditOperationID string
 }
-type SchemaObservation struct { Present bool; AppliedVersion int64 }
+type SchemaObservation struct {
+    Present bool
+    AppliedVersion int64
+    Execution *SchemaExecution
+}
+type SchemaExecution struct {
+    ID, ContainerName, CandidateDigest, Phase string
+    Deadline time.Time
+    ExitCode *int
+}
 type Instance struct {
     ContainerID, ImageID, ImageDigest, Status, Health, Generation string
     CreatedAt time.Time
@@ -172,9 +181,15 @@ Implement `Build(ctx context.Context, sourceSHA, imageDigest string, files fs.FS
 - [ ] Add an offline catalog command before database configuration loads. The build must use the same embedded SQL as the image. Reject duplicate versions and invalid catalogs. Attach the final image digest externally after publication; do not embed the image's own final digest inside it.
 - [ ] Publish `migration_manifest` as a bounded JSON string in the shared release manifest's existing scalar variables. The protected consumer parses typed entries and checks source SHA, verified build, and server digest. Preserve the existing total manifest size bound.
 - [ ] Add `candidate_image string`, `candidate_commit string`, and `candidate_migrations list(object({version=number,name=string,sha256=string}))` to `tack_schema`. Retain its import identity. Plan pending migrations from candidate metadata and the restricted live applied-version read, without installing or executing candidate code.
+- [ ] Add optional `api_token_file` and `connect_address` to Tack's provider node model and schema. Require exactly one token source only when configuring the mutation client; read the protected token file inside that client and never replace its path with token bytes in configuration or state. Map `connect_address` to Task 2's transport field. Observation-only planning must not load either mutation token source.
+- [ ] Add ordered `compose_files list(string)` for the schema execution, using the same protected base and environment override as the application. Generate a typed YAML override containing only the migration service's verified candidate image and nonsecret execution labels. Submit that override through transport stdin and a final `-f -` argument, with the declared install directory as the project directory. Compose supports [ordered files and stdin](https://docs.docker.com/reference/cli/docker/compose/). Do not change the installed image, copy secrets, or substitute a tag into the base file to select the candidate.
 - [ ] Recheck starting database version before apply. Verify the candidate digest and embedded catalog, then use the existing audited guarded migration with `--expect-from` and `--to`. Verify the resulting database version before application updates.
+- [ ] Preserve the existing 3600-second migration limit from the schema provider's `applyTimeoutSeconds`. Add an absolute RFC3339 `--deadline` to the migration command and pass it from the protected provider. Enforce the deadline inside the migration process with its Go context; a Proxmox or Docker client timeout alone cannot bound the container's SQL work. Reject expired deadlines before mutation. Give post-timeout version observation and audit completion a separate thirty-second context that preserves the operation identity. Bound the full command, including its terminal audit write, to the deadline plus thirty seconds.
+- [ ] Execute the existing Compose migration service as one named container per schema attempt, without immediate automatic removal. Derive its name from the schema resource identity, candidate source SHA, and target version. Record those nonsecret labels, immutable image, and absolute deadline. Extend the fixed reader to return only `SchemaExecution` metadata for this target. Use phases `running`, `exited`, and `unknown`; omit `ExitCode` until exit. Keep these jobs separate from ordinary application instances.
+- [ ] Before starting or retrying a migration, inspect that target's recorded execution. Wait for a running matching attempt and verify actual completion before releasing its lock. Refuse another migration while an older attempt remains active. Reuse a successful completed attempt only after the database version and audit outcome agree. Preserve incomplete attempts when status is unreadable. Remove a finished job container only after its final audit outcome and deployment result are durable; never delete database or audit history.
 - [ ] Preserve candidate schema inputs during application recovery. Permit only application image variables in recovery; the older binary must pass compatibility tests against the newer schema.
 - [ ] Add `TestCandidateManifestDeterministic`, `TestCandidateManifestRejectsChangedSQL`, `TestSchemaPlansUninstalledCandidate`, `TestSchemaRefusesChangedStartingVersion`, and `TestApplicationRecoveryPreservesNewSchema`. Use real YugabyteDB and old/new images for runtime cases.
+- [ ] Add `TestMigrationDeadlineSurvivesClientLoss` through the real migration CLI, Docker Compose, and YugabyteDB with a shortened deadline and deliberately slow synthetic SQL. Terminate the client, verify the container's own deadline ends the query, and verify the resulting version and audit outcome. Assert that a second apply does not start another container while the first remains active and that unavailable completion evidence prevents lock release and further mutation.
 - [ ] Run `make build`, the existing Tack container integration target, and provider acceptance. Commit catalog publishing and provider integration separately.
 
 ## Task 5: Complete requests before replacement
@@ -228,6 +243,7 @@ Before an environment changes, select the prior image from its last verified dep
 
 - [ ] Extend Tack's existing build workflow to publish exact server/consumer digests and migration metadata for PR and merged commits. Reuse the shared artifact provenance checks and protected configuration revisions.
 - [ ] Configure separate QA/prod planning and apply environments. Install restricted planning key/host-key references only in planning environments. Keep mutation and backend-write credentials out of PR build jobs.
+- [ ] Set protected `JobTimeoutMinutes` to 120 for both Tack environments. Preserve the existing one-hour migration limit and allow the remaining job time for image downloads, checks, and recovery. Require backend credentials to remain valid for the whole job plus fifteen minutes before starting it.
 - [ ] Provision fixed Access endpoints for every configured planning guest, lock endpoint, and apply API. Use separate environment and role service identities with exact-token policies. Keep the connector origins and provider loopback bindings in protected configuration. Install its pinned client in the shared action container. Verify the completed provider over those endpoints, not only the disposable connection tester.
 - [ ] Extend `ops deploy verify` with `ExpectedInstance{Target, Service, InstanceID, Digest string}` and `VerifyInstances(ctx context.Context, expected []ExpectedInstance) (Verification, error)`. `Verification` contains `Instances []InstanceResult` and `Healthy bool`; `InstanceResult` contains target, service, instance ID, expected/actual digest, health, and error-code strings. Fail for missing, duplicate, stale, incorrect-image, or unhealthy declared instances.
 - [ ] Verify application readiness through the configured `/readyz` endpoint and audit-consumer readiness through its declared check. Do not equate a missing Docker healthcheck with a failed application, or a running container with a working service. Keep readiness endpoints in protected configuration, not caller-selected URLs.
