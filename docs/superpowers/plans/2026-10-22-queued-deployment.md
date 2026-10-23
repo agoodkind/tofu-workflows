@@ -84,6 +84,7 @@ Create the consumer schema and command boundary before writing workflow jobs. Ke
 
 - [ ] Check out the exact configuration revision and validate the release manifest before OpenTofu execution.
 - [ ] Run `dflook/tofu-plan` for both environments with matching stable labels and `add_github_comment: false`.
+- [ ] Pass the validated environment `Parallelism` value to the action's `parallelism` input.
 - [ ] Publish through `report.Publish`. The inspected upstream action does not create PR comments for `workflow_run`; use its outputs in the Go reporter.
 - [ ] Publish checks against the verified PR head, not the protected workflow's commit. Exercise a head change while planning.
 - [ ] Show result, change counts, commit, environment, expandable changes, and run links. Preserve earlier results as workflow runs.
@@ -135,6 +136,7 @@ Create the consumer schema and command boundary before writing workflow jobs. Ke
 - [ ] Select one release under the complete workflow concurrency exclusion.
 - [ ] For validation, create a fresh plan for that exact release, report it, and apply its saved plan with dflook. Configure `auto_approve` for the accepted merge authorization rather than comparing against the older PR preview.
 - [ ] Verify installed artifacts and runtime behavior, then record the result.
+- [ ] Pass the environment's `Parallelism` value to apply and recovery. Preserve the resource ordering required by the consumer.
 - [ ] Execute production only after validation success. Use production's own backend, plan, credentials, and checks.
 - [ ] On a mutation or health failure, inspect actual state, evaluate recovery, plan the previous compatible application values, apply that recovery plan, and check the restored service.
 - [ ] Keep original failure and recovery results distinct. Stop the deployment set when recovery fails or actual state cannot be established.
@@ -211,13 +213,13 @@ Run the complete suite with `go test -tags=acceptance ./internal/acceptance -cou
 
 ## Task 6: Integrate the first consumer separately
 
-Use the separate [Tack consumer-readiness plan](2026-10-22-tack-consumer-readiness.md). This task produces verified consumer prerequisites; it does not claim that the generic workflow completes Tack's unfinished provider implementation.
+Use the separate [Tack implementation plan](2026-10-22-tack-deployment-implementation.md). This task produces verified consumer prerequisites; it does not claim that the generic workflow completes Tack's provider implementation.
 
 Tack is the first consumer. Its [declarative deployment specification](https://github.com/agoodkind/tack/blob/2b1d90ea65519e978ce8e425f3228c9c0542593d/docs/superpowers/specs/2026-10-10-tack-provider.md) requires existing general providers for supported resources and Tack resources only for application-specific behavior.
 
 The inspected merged implementation registers only the database-migration resource. It does not yet supply complete application deployment through OpenTofu. Complete that existing provider work and its integration plan before enabling automatic Tack applies. This plan implements the generic workflow library; it does not silently expand into a replacement provider or full infrastructure migration.
 
-- [ ] Create a separate Tack integration plan that maps the existing deployment fields to their owning providers and supplies the exact root, backend, credentials, release manifest, and checks required by Task 1.
+- [ ] Complete the provider and consumer tasks in the Tack implementation plan, including the isolated roots, restricted observation, migration manifest, rollout, and acceptance checks.
 - [ ] Replace any proposed SSH-only deployment wrapper with the actual provider authentication and transport. Verify its permissions before enabling live PR planning.
 - [ ] Add the small Tack caller workflow at the pinned shared revision after the runtime-audit implementation completes.
 - [ ] Verify one QA deployment, production promotion, and compatible recovery with exact installed-image evidence.

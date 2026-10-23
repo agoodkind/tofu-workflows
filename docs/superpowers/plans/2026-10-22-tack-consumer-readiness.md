@@ -87,34 +87,8 @@ Source evidence:
 - Recovery lowers the desired schema version: reject the recovery plan.
 - A generic workflow test passes: still require Tack's own installed-image, runtime, and audit evidence.
 
-## Task 1: Establish application ownership
+## Implement the approved design
 
-- [ ] Read the existing Tack provider implementation and Configs deployment sources at their current revisions.
-- [ ] Map every application deployment field to the general provider or Tack-specific resource that owns it under the existing specification.
-- [ ] Complete the separate provider implementation plan for the missing resources. Supply its exact resource schemas, live readers, mutation behavior, imports, and acceptance tests before implementing them.
-- [ ] Define independent application roots and backend keys for QA and production. Follow Configs' existing independent-root convention. Keep shared guest and host resources in their current states.
-- [ ] Verify import with complete plans and explicit resource addresses. Accept adoption only when it preserves live resources and avoids duplicate writers.
+Use the [Tack implementation plan](2026-10-22-tack-deployment-implementation.md) for exact interfaces, repository ownership, adoption steps, and acceptance tests. The [disposable test results](2026-10-22-tack-deployment-spikes.md) record the feasibility evidence and its limits.
 
-This provider implementation is existing unfinished work, not a generic workflow feature. The shared library can proceed while its owner completes these prerequisites.
-
-## Task 2: Establish provider access and state protection
-
-- [ ] Inventory the exact API operations used by each provider during read, plan, apply, and recovery from source and disposable-environment execution.
-- [ ] Supply a metadata-only planning identity and a separate applying identity. Prove that the planning identity rejects mutation and unrestricted guest execution.
-- [ ] Reuse encrypted state and saved-plan protection from the current OpenTofu configuration. Store encryption and backend credentials in protected GitHub environments; never copy decrypted values into documents or workflow outputs.
-- [ ] Verify that required host or deployment locks remain effective when GitHub invokes OpenTofu. Do not bypass locks currently enforced by Configs tooling.
-- [ ] Record exact root paths, backend identities, provider versions, credential variable names, and permission-test results as the consumer configuration. Do not substitute broad credentials when a required restriction fails.
-
-## Task 3: Connect and validate the consumer
-
-- [ ] Generate a manifest for the exact merged Tack commit with server and audit-consumer image digests and required migration inputs.
-- [ ] Configure the shared workflow using the verified application roots and immutable provider lock files.
-- [ ] Implement trusted health and inspection commands that return the shared observation contract from real running services.
-- [ ] Test a normal release, a QA failure, a production health failure, compatible recovery, and interrupted apply on disposable infrastructure.
-- [ ] Verify a single-instance release restores service within 60 seconds after service interruption begins. Verify a multiple-instance release serves requests throughout the update and waits for each updated instance to become ready before updating another. Verify an unhealthy instance prevents an update that would interrupt service.
-- [ ] Verify that an active request finishing within 30 seconds completes before replacement. Verify that a request exceeding that deadline continues without termination, the container remains running, and the canceled update restores routing.
-- [ ] Verify exact installed images and runtime audit records. Only then enable automatic production deployment after the audit work completes.
-
-## Planning status
-
-The shared workflow plan supplies its implementation contracts. This companion identifies the remaining Tack-specific work; it is not a completed implementation plan for the missing providers or their permission boundary. Do not report the complete Tack rollout as de-risked until those concrete plans and acceptance results exist.
+This document preserves the approved choices and inspected source capabilities. The implementation plan supplies the development tasks; deployment readiness requires those tasks and their acceptance evidence.

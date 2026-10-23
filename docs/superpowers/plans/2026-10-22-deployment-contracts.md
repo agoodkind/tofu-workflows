@@ -47,6 +47,7 @@ type Environment struct {
     CLIWorkspace string
     BackendFile string
     StateID string
+    Parallelism int
     VariableFiles []string
     SecretEnvNames []string
     HealthCheck Check
@@ -86,6 +87,8 @@ type CheckIdentity struct {
 ```
 
 `StateID` identifies the actual backend and CLI workspace. For S3-compatible state, canonicalize endpoint, bucket, key, and workspace before hashing. Add a tested identity adapter before supporting another backend. Reject duplicate state identities. Require one consumer repository to own each managed state.
+
+Require positive `Parallelism` and pass it to the dflook plan/apply `parallelism` input. This controls concurrent resource operations within an environment and does not replace workflow-level release ordering. Consumers requiring serial resource updates select one.
 
 Accept scalar `string`, `number`, and `bool` release variables. Trusted configuration declares their names, kinds, allowed string values, and artifact repositories. Reject nulls, unexpected keys, executable arguments, configuration revisions, paths, and provider selections from release input.
 
