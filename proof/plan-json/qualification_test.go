@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,6 +53,20 @@ func plan(t *testing.T, directory string, environment []string, name string) *tf
 	}
 	if result.TerraformVersion != "1.13.2" {
 		t.Fatalf("Unexpected OpenTofu version: %s", result.TerraformVersion)
+	}
+	var original map[string]any
+	if err := json.Unmarshal(raw, &original); err != nil {
+		t.Fatal("The source JSON could not be checked")
+	}
+	for _, entry := range original["resource_changes"].([]any) {
+		resource := entry.(map[string]any)
+		decoded := change(t, result, resource["address"].(string))
+		originalChange := resource["change"].(map[string]any)
+		for field, actual := range map[string]any{"before_sensitive": decoded.BeforeSensitive, "after_sensitive": decoded.AfterSensitive, "after_unknown": decoded.AfterUnknown} {
+			if !reflect.DeepEqual(originalChange[field], actual) {
+				t.Fatalf("The library changed the original %s mask", field)
+			}
+		}
 	}
 	t.Logf("terraform-json accepted OpenTofu %s plan format %s", result.TerraformVersion, result.FormatVersion)
 	return result
@@ -142,11 +157,27 @@ func redact(value, sensitive, unknown any) any {
 func assertRedaction(t *testing.T, value *tfjson.Plan, confidential string) {
 	t.Helper()
 	visible := make(map[string]any)
+	markedValues := map[string]struct{}{}
 	for _, resource := range value.ResourceChanges {
+		collectMarkedStrings(resource.Change.Before, resource.Change.BeforeSensitive, markedValues)
+		collectMarkedStrings(resource.Change.After, resource.Change.AfterSensitive, markedValues)
 		visible[resource.Address] = map[string]any{"before": redact(resource.Change.Before, resource.Change.BeforeSensitive, nil), "after": redact(resource.Change.After, resource.Change.AfterSensitive, resource.Change.AfterUnknown)}
 	}
 	for name, output := range value.OutputChanges {
+		collectMarkedStrings(output.Before, output.BeforeSensitive, markedValues)
+		collectMarkedStrings(output.After, output.AfterSensitive, markedValues)
 		visible["output."+name] = redact(output.After, output.AfterSensitive, output.AfterUnknown)
+	}
+	if paths := matchingPaths(visible, confidential, ""); len(paths) > 0 {
+		t.Logf("Original masks leave copied values at %v; apply known-value redaction before formatting", paths)
+	}
+	values := make([]string, 0, len(markedValues))
+	for value := range markedValues {
+		values = append(values, value)
+	}
+	slices.SortFunc(values, func(a, b string) int { return len(b) - len(a) })
+	for key, item := range visible {
+		visible[key] = redactKnownStrings(item, values)
 	}
 	var rendered bytes.Buffer
 	encoder := json.NewEncoder(&rendered)
@@ -160,6 +191,56 @@ func assertRedaction(t *testing.T, value *tfjson.Plan, confidential string) {
 	}
 	if !bytes.Contains(display, []byte("visible-item")) || !bytes.Contains(display, []byte("<sensitive>")) || !bytes.Contains(display, []byte("<unknown>")) {
 		t.Fatal("The projection did not preserve public values, sensitivity, and unknown markers")
+	}
+}
+
+func collectMarkedStrings(value, mask any, values map[string]struct{}) {
+	marked, _ := mask.(bool)
+	switch current := value.(type) {
+	case string:
+		if marked && current != "" {
+			values[current] = struct{}{}
+		}
+	case map[string]any:
+		for key, item := range current {
+			next := child(mask, key)
+			if marked {
+				next = true
+			}
+			collectMarkedStrings(item, next, values)
+		}
+	case []any:
+		for index, item := range current {
+			next := element(mask, index)
+			if marked {
+				next = true
+			}
+			collectMarkedStrings(item, next, values)
+		}
+	}
+}
+
+func redactKnownStrings(value any, values []string) any {
+	switch current := value.(type) {
+	case string:
+		for _, sensitive := range values {
+			current = strings.ReplaceAll(current, sensitive, "<sensitive>")
+		}
+		return current
+	case map[string]any:
+		result := map[string]any{}
+		for key, item := range current {
+			result[key] = redactKnownStrings(item, values)
+		}
+		return result
+	case []any:
+		result := make([]any, len(current))
+		for index, item := range current {
+			result[index] = redactKnownStrings(item, values)
+		}
+		return result
+	default:
+		return value
 	}
 }
 
