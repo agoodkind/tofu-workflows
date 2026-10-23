@@ -159,7 +159,11 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 		other  string
 	}{{s, "tack-prod"}, {prodStorage, "tack-qa"}} {
 		for _, method := range []string{"GET", "PUT"} {
-			status, _, err := entry.client.request(method, "/"+bucket+"/"+entry.other+".tfstate", []byte("synthetic-denied"))
+			var body []byte
+			if method == "PUT" {
+				body = []byte("synthetic-denied")
+			}
+			status, _, err := entry.client.request(method, "/"+bucket+"/"+entry.other+".tfstate", body)
 			if err != nil || status != 403 {
 				t.Fatalf("Cross-environment %s expected403: status=%d", method, status)
 			}
@@ -195,7 +199,7 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 		if output, err := tofu(dir, runEnvironment, "init", "-backend-config=backend.hcl", "-input=false", "-no-color"); err != nil {
 			t.Fatalf("init failed: %v: %s", err, output)
 		}
-		if output, err := tofu(dir, environment, "plan", "-out=release.plan", "-input=false", "-no-color"); err != nil {
+		if output, err := tofu(dir, runEnvironment, "plan", "-out=release.plan", "-input=false", "-no-color"); err != nil {
 			t.Fatalf("plan failed: %v: %s", err, output)
 		}
 		plan, err := os.ReadFile(filepath.Join(dir, "release.plan"))
@@ -205,7 +209,7 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 		if bytes.Contains(plan, []byte(payload)) || !bytes.Contains(plan, []byte("encrypted_data")) {
 			t.Fatal("saved plan did not satisfy encryption assertion")
 		}
-		if output, err := tofu(dir, environment, "apply", "-input=false", "-no-color", "release.plan"); err != nil {
+		if output, err := tofu(dir, runEnvironment, "apply", "-input=false", "-no-color", "release.plan"); err != nil {
 			t.Fatalf("apply failed: %v: %s", err, output)
 		}
 	}
