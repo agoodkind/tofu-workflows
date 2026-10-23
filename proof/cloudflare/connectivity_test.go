@@ -37,6 +37,7 @@ func accessRequest(t *testing.T, prefix string) (int, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.Header.Set("User-Agent", "cloudflared/2026.9.1")
 	if prefix != "" {
 		request.Header.Set("CF-Access-Client-ID", required(t, prefix+"CLIENT_ID"))
 		request.Header.Set("CF-Access-Client-Secret", required(t, prefix+"CLIENT_SECRET"))
@@ -47,6 +48,9 @@ func accessRequest(t *testing.T, prefix string) (int, []byte) {
 		t.Fatal("HTTPS connection failed")
 	}
 	defer response.Body.Close()
+	if response.Header.Get("CF-Mitigated") == "challenge" {
+		t.Fatal("A browser challenge prevented the Access identity check")
+	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
 	if err != nil {
 		t.Fatal("HTTPS response could not be read")
