@@ -1,0 +1,33 @@
+name: Disposable R2 bucket credential proof
+on:
+  push:
+    branches: [codex/upstream-contract-proof]
+    paths:
+      - .github/workflows/r2-buckets-readiness.yml
+      - proof/r2-buckets/**
+permissions:
+  contents: read
+jobs:
+  r2-buckets:
+    runs-on: ubuntu-24.04
+    environment: deployment-readiness-proof
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: opentofu/setup-opentofu@d1e6b1026dfcba594ff9f4ac8dd175208a16afd8
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+      - name: Verify separate bucket credentials and read-only previews
+        run: go test -v ./proof/r2-buckets -count=1 -timeout=8m
+        env:
+          R2_BUCKET_PROOF_QA_ACCESS_KEY_ID: ${{ secrets.R2_BUCKET_PROOF_QA_ACCESS_KEY_ID }}
+          R2_BUCKET_PROOF_QA_SECRET_ACCESS_KEY: ${{ secrets.R2_BUCKET_PROOF_QA_SECRET_ACCESS_KEY }}
+          R2_BUCKET_PROOF_PROD_ACCESS_KEY_ID: ${{ secrets.R2_BUCKET_PROOF_PROD_ACCESS_KEY_ID }}
+          R2_BUCKET_PROOF_PROD_SECRET_ACCESS_KEY: ${{ secrets.R2_BUCKET_PROOF_PROD_SECRET_ACCESS_KEY }}
+          R2_BUCKET_PROOF_PREVIEW_ACCESS_KEY_ID: ${{ secrets.R2_BUCKET_PROOF_PREVIEW_ACCESS_KEY_ID }}
+          R2_BUCKET_PROOF_PREVIEW_SECRET_ACCESS_KEY: ${{ secrets.R2_BUCKET_PROOF_PREVIEW_SECRET_ACCESS_KEY }}
