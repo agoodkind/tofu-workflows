@@ -17,7 +17,6 @@ import (
 	"time"
 )
 
-const apiURL = "https://deployment-qa-api-proof.goodkind.io/"
 const sshHostname = "deployment-qa-ssh-proof.goodkind.io"
 const cloudflaredURL = "https://github.com/cloudflare/cloudflared/releases/download/2026.9.1/cloudflared-linux-amd64"
 const cloudflaredDigest = "03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc"
@@ -31,50 +30,49 @@ func required(t *testing.T, name string) string {
 	}
 	return value
 }
-func accessRequest(t *testing.T, prefix string) (int, []byte) {
-	t.Helper()
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, apiURL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("User-Agent", "cloudflared/2026.9.1")
-	if prefix != "" {
-		request.Header.Set("CF-Access-Client-ID", required(t, prefix+"CLIENT_ID"))
-		request.Header.Set("CF-Access-Client-Secret", required(t, prefix+"CLIENT_SECRET"))
-	}
-	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatal("HTTPS connection failed")
-	}
-	defer response.Body.Close()
-	if response.Header.Get("CF-Mitigated") == "challenge" {
-		t.Fatal("A browser challenge prevented the Access identity check")
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
-	if err != nil {
-		t.Fatal("HTTPS response could not be read")
-	}
-	return response.StatusCode, body
-}
-
-func TestHTTPSRequiresExactServiceIdentity(t *testing.T) {
-	for _, test := range []struct{ name, prefix string }{{"missing identity", ""}, {"valid but unauthorized identity", "CF_PROOF_WRONG_"}} {
+func TestTLSOriginRequiresExactServiceIdentity(t *testing.T) {
+	binary := cloudflared(t)
+	for _, test := range []struct {
+		name, prefix string
+		allowed      bool
+	}{{"authorized identity", "CF_PROOF_", true}, {"valid but unauthorized identity", "CF_PROOF_WRONG_", false}, {"missing identity", "", false}} {
 		t.Run(test.name, func(t *testing.T) {
-			status, _ := accessRequest(t, test.prefix)
-			if status != http.StatusForbidden {
-				t.Fatalf("Access returned status %d; expected403", status)
+			address := tunnel(t, binary, "deployment-qa-api-proof.goodkind.io", test.prefix)
+			transport := &http.Transport{DialContext: func(ctx context.Context, network, target string) (net.Conn, error) {
+				if target != "hypervisor.suburban.goodkind.io:8006" {
+					return nil, fmt.Errorf("Unexpected fixed origin target")
+				}
+				return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, address)
+			}}
+			defer transport.CloseIdleConnections()
+			client := &http.Client{Transport: transport, Timeout: 15 * time.Second}
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://hypervisor.suburban.goodkind.io:8006/", nil)
+			if err != nil {
+				t.Fatal(err)
 			}
-			t.Logf("Access rejected the request with HTTP%d", status)
+			response, err := client.Do(request)
+			if !test.allowed {
+				if err == nil {
+					response.Body.Close()
+					t.Fatal("An unauthorized Access identity established origin TLS")
+				}
+				t.Log("The origin TLS connection failed without an authorized Access identity.")
+				return
+			}
+			if err != nil {
+				t.Fatal("The authorized identity could not establish verified origin TLS")
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
+			if err != nil || response.StatusCode != 200 || !bytes.Contains(body, []byte("Proxmox Virtual Environment")) {
+				t.Fatal("The verified TLS response did not match the PVE login page")
+			}
+			if response.TLS == nil || len(response.TLS.VerifiedChains) == 0 {
+				t.Fatal("The client did not verify the origin certificate")
+			}
+			t.Log("The default Go HTTP client verified the PVE certificate and read its public login page through the scoped TCP connection.")
 		})
 	}
-	t.Run("authorized identity", func(t *testing.T) {
-		status, body := accessRequest(t, "CF_PROOF_")
-		if status != http.StatusOK || !bytes.Contains(body, []byte("Proxmox Virtual Environment")) {
-			t.Fatalf("Verified HTTPS origin response did not match the PVE login page; status=%d", status)
-		}
-		t.Log("The exact Access identity received the public PVE login page over verified HTTPS.")
-	})
 }
 
 func cloudflared(t *testing.T) string {
@@ -103,19 +101,20 @@ func cloudflared(t *testing.T) string {
 	return path
 }
 
-func sshProbe(t *testing.T, binary, prefix string) string {
+func tunnel(t *testing.T, binary, hostname, prefix string) string {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	address := listener.Addr().String()
-	_, port, _ := net.SplitHostPort(address)
 	listener.Close()
-	command := exec.CommandContext(t.Context(), binary, "access", "tcp", "--hostname", sshHostname, "--url", address, "--log-level", "error")
+	command := exec.CommandContext(t.Context(), binary, "access", "tcp", "--hostname", hostname, "--url", address, "--log-level", "error")
 	command.Env = os.Environ()
-	for name, source := range map[string]string{"TUNNEL_SERVICE_TOKEN_ID": "CLIENT_ID", "TUNNEL_SERVICE_TOKEN_SECRET": "CLIENT_SECRET"} {
-		command.Env = append(command.Env, name+"="+required(t, prefix+source))
+	if prefix != "" {
+		for name, source := range map[string]string{"TUNNEL_SERVICE_TOKEN_ID": "CLIENT_ID", "TUNNEL_SERVICE_TOKEN_SECRET": "CLIENT_SECRET"} {
+			command.Env = append(command.Env, name+"="+required(t, prefix+source))
+		}
 	}
 	var diagnostics bytes.Buffer
 	command.Stdout = &diagnostics
@@ -136,6 +135,13 @@ func sshProbe(t *testing.T, binary, prefix string) string {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	return address
+}
+
+func sshProbe(t *testing.T, binary, prefix string) string {
+	t.Helper()
+	address := tunnel(t, binary, sshHostname, prefix)
+	_, port, _ := net.SplitHostPort(address)
 	hosts := filepath.Join(t.TempDir(), "known_hosts")
 	if err := os.WriteFile(hosts, []byte(trustedHostKey), 0600); err != nil {
 		t.Fatal(err)
