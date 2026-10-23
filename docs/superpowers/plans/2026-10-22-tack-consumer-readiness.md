@@ -6,7 +6,7 @@
 
 **Architecture:** Keep Tack application resources in isolated OpenTofu roots and state. Reuse the established provider ownership from the existing Tack specification. Supply the shared workflow with exact configuration revisions, release manifests, protected credentials, and real application checks.
 
-**Tech stack:** OpenTofu, the existing Tack and general providers, Configs, and the shared GitHub Actions workflows.
+**Tech stack:** OpenTofu, configsctl, the existing Tack and general providers, Configs, and the shared GitHub Actions workflows.
 
 **Spec:** Follow the [shared design](../specs/2026-10-22-queued-deployment-design.md) and the existing [declarative Tack specification](https://github.com/agoodkind/tack/blob/2b1d90ea65519e978ce8e425f3228c9c0542593d/docs/superpowers/specs/2026-10-10-tack-provider.md).
 
@@ -120,6 +120,8 @@ The selected storage and GitHub environments are:
 Provisioning verified both private buckets and all four credential policies on October 23, 2026. Every identity could read only its own bucket. Planning identities could not write state, delete objects, or create locks. Applying identities could write their own bucket. Cross-bucket operations failed. Cleanup removed the synthetic objects and temporary administrator; the intended buckets and four operational identities remain configured.
 
 Each GitHub environment now contains `TF_BACKEND_ENV`, a JSON bundle containing `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `TF_VAR_vault_tofu_state_passphrase`. QA and production use independent random 256-bit state-encryption passphrases. These new application keys do not come from the existing infrastructure vault. Supply provider authentication separately through `TF_PROVIDER_ENV` when implementing the workflow.
+
+Run application plans and applies through the shared helper's configsctl execution package. The CI path receives the selected environment's explicit credentials and connection settings; it does not load the Configs vault or Ansible inventory. Preserve the existing local command for infrastructure operations. The shared contracts specify the required package extraction, strict credential handling, saved-plan behavior, and lock lifetime.
 
 The buckets remain empty before state adoption. The operational tokens do not expire automatically. Provisioning verified the secret metadata and removed local credential copies. This establishes backend provisioning, not application import or deployment.
 

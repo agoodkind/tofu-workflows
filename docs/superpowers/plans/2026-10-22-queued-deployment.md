@@ -4,9 +4,9 @@
 
 **Goal:** Publish PR plans and apply every merged release in order through validation and production environments.
 
-**Architecture:** Reuse dflook actions for plans, applies, and PR reports. GitHub Actions runs the jobs; a Go executable selects releases and verifies deployment records. Consumers supply OpenTofu configuration, credentials, and checks.
+**Architecture:** Reuse configsctl for OpenTofu execution, redaction, cancellation, and host locks. GitHub Actions runs the jobs; a Go executable selects releases, reports plans, and verifies deployment records. Consumers supply OpenTofu configuration, credentials, and checks.
 
-**Tech stack:** GitHub Actions reusable workflows, Go, OpenTofu, dflook actions, Docker, and the GitHub REST API.
+**Tech stack:** GitHub Actions reusable workflows, Go, OpenTofu, configsctl, Docker, and the GitHub REST API.
 
 **Spec:** Read the [deployment design](../specs/2026-10-22-queued-deployment-design.md) and the [implementation contracts](2026-10-22-deployment-contracts.md). The contracts define exact types, pinned dependencies, permissions, queue transitions, and recovery behavior for every task.
 
@@ -29,17 +29,18 @@
 
 | Component | Responsibility | Task |
 | --- | --- | --- |
+| configsctl public `tofurun` and `hostlock` packages | Reuse command execution and locking with explicit CI inputs. | 0 |
 | `cmd/tofu-workflows` and `action.yml` | Invoke the compiled Go action. | 1 |
 | `internal/config`, `internal/release`, `internal/credentials` | Validate configuration and release metadata; install declared credential variables. | 1 |
 | `internal/githubapi` | Configure the maintained GitHub SDK and enforce safe errors and authorization. | 1 |
-| `internal/access`, `internal/preview`, `internal/upstream` | Connect fixed private endpoints and run the pinned upstream preview. | 2 |
+| `internal/access`, `internal/preview`, `internal/tofu` | Connect fixed private endpoints and adapt validated inputs to configsctl. | 2 |
 | `internal/report` and the plan workflow | Publish results for the correct PR revision. | 2 |
 | `internal/queue`, `internal/deployment` | Select releases and record intent and final outcomes. | 3 |
 | `internal/check`, `internal/recovery` and the deploy workflow | Inspect actual state, apply releases, and recover compatible application values. | 4 |
 | `internal/execution`, `environment/Dockerfile` and `environment/action.yml` | Run one environment sequence with the existing configsctl lock library. | 4 |
 | `internal/acceptance` | Exercise real workflows and managed resources. | 5 |
 
-Task 1 precedes Tasks 2 and 3, which may run independently. Task 4 consumes Task 3. Task 5 verifies their integration. Task 6 establishes consumer readiness separately.
+Tasks 0 and 1 may proceed independently. Task 3 consumes Task 1 and may proceed alongside Task 0. Task 2 requires Tasks 0 and 1; Task 4 requires Tasks 0, 2, and 3. Task 5 verifies their integration. Task 6 establishes consumer readiness separately.
 
 ## Review focus
 
@@ -48,6 +49,18 @@ Task 1 precedes Tasks 2 and 3, which may run independently. Task 4 consumes Task
 - A recovery fails: stop that deployment set and preserve its incomplete record.
 - A PR changes executable configuration: do not provide apply credentials or unrestricted production access to that execution.
 - Suppress synthetic secret values from plan reports, comments, logs, summaries, and uploaded artifacts.
+
+## Task 0: Expose the existing configsctl runner for CI
+
+**Files:** In configsctl, extract execution into `tofurun/{run,environment,output}.go`, expose `hostlock`, and add `cmd/configsctl/ci.go` and focused CI acceptance tests. Modify the existing main dispatch, execution, redaction, and lock callers to consume that same implementation. Preserve existing local behavior.
+
+**Interfaces:** Implement the exact `tofurun.Request`, `Result`, `OutputMode`, `Run`, opaque `hostlock.Scope`, restricted transport, strict renewal, and checked release contracts. Consume explicit environment assignments and connection settings rather than the Configs vault or inventory. The shared helper links the public packages and keeps one Set for the complete environment sequence.
+
+- [ ] Dispatch the read-only `ci tofu` CLI before vault setup. Use the same public runner from the existing local command and the workflow. Preserve detailed exit status two and the exact saved-plan file. Do not add an executable shim, lock bypass, second supervisor, or new shell script.
+- [ ] Add `TestCIRunsWithoutVaultOrInventory` using real OpenTofu, temporary HOME/configuration, and an OS file-access trace. Assert successful init/plan and absence of reads of the unrelated synthetic vault and password files. Add `TestCIEnvironmentIsExplicit` using a real disposable provider HTTP service; assert the provider receives declared synthetic credentials and cannot observe unrelated parent values.
+- [ ] Add `TestCISavedPlanAndStaleState` through the public runner with real temporary state and acquired locks. Assert exact-plan apply and stale-plan rejection without another plan. Add `TestCIRequiresOwnedScope` for nil, foreign-process, released, expired, and incomplete-target scopes and a forged `CONFIGS_LOCK_STATE`; assert unchanged managed resources.
+- [ ] Add `TestCIProgressAndPrivateJSON` with actual provider diagnostics containing synthetic secrets and split writes. Assert redacted live progress/logs, valid exact mode-0600 JSON, correct detailed statuses, and secret-free public reports. Add `TestCICancellationStopsProviderGroup` with SIGTERM, real child processes, independent cleanup, and checked release/abandon outcomes.
+- [ ] Preserve the real SSH/filesystem interoperability cases from the contracts. Run `make check`, `make test`, and the owning repository's explicit real-dependency integration target. Missing required tools fail the CI acceptance rather than silently skipping it. Publish and pin the completed module only after those results pass. Commit the package extraction and CI behavior as separate coherent changes.
 
 ## Task 1: Define consumer inputs and build the Go action
 
@@ -65,7 +78,7 @@ Create the consumer schema and command boundary before writing workflow jobs. Ke
 - Create `internal/githubapi/client.go` with `NewClient(token string) (*github.Client, error)` using `github.com/google/go-github/v93/github`. Reject an empty token. Use the v93 option-based `github.NewClient`, including `github.WithAuthToken` and `github.WithHTTPClient` with a bounded timeout; it returns the client and an error. Use SDK API models, services, iterators, and typed errors throughout the following tasks. Report safe status codes and endpoint paths instead of raw authenticated responses. Do not implement another REST client. In the signatures below, `github.Client` refers to this SDK type.
 - Implement `run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) int` in `cmd/tofu-workflows/main.go`. Commands are `validate`, `credentials`, `preview`, `environment`, `cleanup`, `report`, `select`, `record`, `inspect`, `recover`, and `reconcile`; arguments identify validated files beneath the job workspace and GitHub references. Credentials come from environment variables only.
 
-- [ ] Add the shared Go build configuration and a Docker action that invokes the compiled executable directly. Derive its image from the pinned dflook runtime, preserving the upstream entrypoints for Task 2.
+- [ ] Add the shared Go build configuration and a Docker action that invokes the compiled executable directly. Use the pinned official OpenTofu image and verified cloudflared from the contracts; link the completed configsctl packages.
 - [ ] Validate required references, exact commits, image digests, disjoint environment state, and explicit timeouts.
 - [ ] Install the backend and provider bundles separately against their disjoint allowlists. Reuse the same JSON validation, masking, environment-file encoding, and selected-file handling for both.
 - [ ] Add CLI tests using temporary real files. Missing inputs and unknown fields must fail before a GitHub or provider operation.
@@ -74,7 +87,7 @@ Create the consumer schema and command boundary before writing workflow jobs. Ke
 
 ## Task 2: Publish plans for every PR commit
 
-**Files:** Create [.github/workflows/plan.yml](../../../.github/workflows/plan.yml), `internal/access/access.go`, `internal/preview/run.go`, `internal/upstream/run.go`, and `internal/report/report.go`. Add the matching public-entry tests in `internal/acceptance/plan_test.go`.
+**Files:** Create [.github/workflows/plan.yml](../../../.github/workflows/plan.yml), `internal/access/access.go`, `internal/preview/run.go`, `internal/tofu/run.go`, and `internal/report/report.go`. Add the matching public-entry tests in `internal/acceptance/plan_test.go`.
 
 **Interfaces:**
 
@@ -84,13 +97,13 @@ Create the consumer schema and command boundary before writing workflow jobs. Ke
 - Define `report.Identity` with `Repository`, `PullRequest`, `Commit`, `Environment`, and `RunURL`.
 - Define the identity fields as strings except `PullRequest int`. Implement `report.Publish(ctx context.Context, client *github.Client, identity Identity, plan Plan) error` under the PR/environment concurrency group. Verify the current head and comment author before writing.
 - Define `report.Plan` with `Succeeded bool`, `Changed bool`, `Counts map[string]int`, `RedactedDiff string`, and `ErrorCode string`. Implement `report.ReadPlan(path string, changed bool) (Plan, error)` with sensitivity masking and the specified output limits.
-- Define `upstream.SavedPlan{Path, JSONPath string, Changed bool, Counts map[string]int}`. Implement `upstream.Plan(ctx context.Context, environment config.Environment, manifest release.Manifest) (SavedPlan, error)` and `upstream.Apply(ctx context.Context, environment config.Environment, plan SavedPlan) error` by starting the pinned existing entrypoints with trusted inputs. Require their output files and preserve their documented exit behavior. Implement `preview.Run(ctx context.Context, environment config.Environment, manifest release.Manifest, identity report.Identity) (report.Plan, error)` for the `preview` command; start fixed listeners, execute the upstream plan, redact/report it, and close the listeners.
+- Define `tofu.SavedPlan{Path, JSONPath string, Changed bool, Counts map[string]int}`. Implement `tofu.Plan(ctx context.Context, environment config.Environment, manifest release.Manifest, scope *hostlock.Scope) (SavedPlan, error)` and `tofu.Apply(ctx context.Context, environment config.Environment, plan SavedPlan, scope *hostlock.Scope) error` as input adapters to `tofurun.Run`. Keep command execution, explicit child environment, process cancellation, and redaction in configsctl. Pass nil scope for previews and the original acquired scope for deployment. Require both output files and preserve detailed exit status. Implement `preview.Run(ctx context.Context, environment config.Environment, manifest release.Manifest, identity report.Identity) (report.Plan, error)` to start fixed listeners, plan, report, and close listeners.
 
-- [ ] Check out the exact configuration revision and validate the release manifest before OpenTofu execution. Implement the contracts' `access.Start` in `internal/access/access.go` and pin the tested client binary. Start its listeners inside the planning action container before the upstream plan entrypoint. Read-only previews do not acquire deployment host locks.
+- [ ] Check out the exact configuration revision and validate the release manifest before OpenTofu execution. Implement the contracts' `access.Start` in `internal/access/access.go` and pin the tested client binary. Start its listeners inside the planning action container before calling the configsctl runner. Read-only previews do not acquire deployment host locks.
 - [ ] Use the pinned official artifact action to download the verified artifact ID without extraction and reject a digest mismatch. Run the bounded ZIP/JSON validator before reading release values.
-- [ ] Run the pinned `dflook/tofu-plan` entrypoint through `preview` for both environments with matching stable labels and `add_github_comment: false`. Keep the Access listeners and OpenTofu inside the same action container.
-- [ ] Pass the validated environment `Parallelism` value to the action's `parallelism` input.
-- [ ] Publish through `report.Publish`. The inspected upstream action does not create PR comments for `workflow_run`; use its outputs in the Go reporter.
+- [ ] Run `preview` for both environments with matching stable labels and restricted credentials. Keep the Access listeners and OpenTofu inside the same action container.
+- [ ] Pass the validated environment `Parallelism` value as OpenTofu's `-parallelism` through the configsctl adapter.
+- [ ] Publish through `report.Publish` using the qualified plan JSON projection. Keep reporting independent of command execution.
 - [ ] Publish checks against the verified PR head, not the protected workflow's commit. Exercise a head change while planning.
 - [ ] Show result, change counts, commit, environment, expandable changes, and run links. Preserve earlier results as workflow runs.
 - [ ] Keep plan files in ephemeral job storage. Do not upload binary plans or JSON containing sensitive values.
@@ -135,7 +148,7 @@ Create the consumer schema and command boundary before writing workflow jobs. Ke
 **Interfaces:**
 
 - Reuse Task 1 configuration and Task 3 decisions. Do not add application-specific branches to the shared workflow.
-- Use the contracts' public configsctl `Set` API and restricted transport option. Define `execution.Result{Observed check.Observation, Recovery check.Observation, Result string, AttemptID int64}` and `execution.Run(ctx context.Context, environment config.Environment, candidate release.Manifest, previous release.Manifest) (Result, error)` for the `environment` command. Coordinate only this fixed sequence with standard Go contexts, `os/exec`, and `errgroup`. The outer workflow assembles the final receipt from both environment results. Derive the action image from the pinned dflook runtime instead of copying or reimplementing OpenTofu execution.
+- Use the contracts' public configsctl `Set`, opaque scope, runner, and restricted transport option. Define `execution.Result{Observed check.Observation, Recovery check.Observation, Result string, AttemptID int64}` and `execution.Run(ctx context.Context, environment config.Environment, candidate release.Manifest, previous release.Manifest) (Result, error)` for the `environment` command. Coordinate only release policy, fixed Access clients, checks, and recovery with standard contexts and `errgroup`; configsctl owns OpenTofu child execution. The outer workflow assembles the final receipt from both environment results. Use the contracts' pinned official runtime rather than another command runner.
 - Implement `check.Run(ctx context.Context, definition config.Check, manifest release.Manifest) (Observation, error)` through the Docker Go SDK using the Task 3 observation type and the contracts' mount, credential, output, and deadline restrictions.
 - Implement `check.Cleanup(ctx context.Context, definition config.Check, manifest release.Manifest) error` with the same trusted container adapter. A cleanup command returns its exit status rather than a health observation. Run an optional `CleanupCheck` in the normal final path and through the consumer job's standard `always()` cleanup step. The `cleanup` command uses the recorded attempt and protected configuration to invoke this same path after interruption; it does not create another deployment system.
 - Define `recovery.Request` with `Environment config.Environment`, `Candidate release.Manifest`, `Previous release.Manifest`, and `Observed check.Observation`.
@@ -143,8 +156,8 @@ Create the consumer schema and command boundary before writing workflow jobs. Ke
 - Implement `recovery.Assess(request Request) (Decision, error)` and `recovery.ValidatePlan(path string, environment config.Environment) error`. Construct recovery from candidate configuration and allowed prior application values. Reject changes to protected resources.
 
 - [ ] Select one release under the complete workflow concurrency exclusion.
-- [ ] Start the environment action's fixed Access listeners and acquire the protected host targets before the fresh plan. Follow the contracts' lease timing, first-failure cancellation, and incomplete remote-operation rules. Keep the existing dflook plan and apply entrypoints within this supervisor; separate steps must not leave an unrenewed lock between them.
-- [ ] For validation, create a fresh plan for that exact release, report it, and apply its saved plan with dflook. Configure `auto_approve` for the accepted merge authorization rather than comparing against the older PR preview.
+- [ ] Start the environment action's fixed Access listeners and acquire the protected host targets before the fresh plan. Follow the contracts' lease timing, first-failure cancellation, and incomplete remote-operation rules. Pass the same opaque scope to configsctl for plan, apply, and recovery; preserve renewal through checks and cleanup.
+- [ ] For validation, create a fresh plan for that exact release, report it, and apply that exact saved plan through configsctl. The accepted merge authorizes this apply without comparing against the older PR preview or another approval.
 - [ ] Verify installed artifacts and runtime behavior, then record the result.
 - [ ] Pass the environment's `Parallelism` value to apply and recovery. Preserve the resource ordering required by the consumer.
 - [ ] Execute production only after validation success. Use production's own backend, plan, credentials, and checks. Set each environment job's `timeout-minutes` from its validated protected `JobTimeoutMinutes` and reject credentials that expire before that limit plus fifteen minutes.

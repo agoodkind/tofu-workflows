@@ -10,9 +10,8 @@ Use these inspected versions initially. Update a pin only with the corresponding
 | --- | --- |
 | Go | `1.27.3` |
 | OpenTofu | `1.13.2` |
-| dflook/tofu-plan | `53b5b01b6eef56cd678401dbe92a0f6ca6b863ff` |
-| dflook/tofu-apply | `1de081df5087fb9ba2acf4866e9bc9b95f79676c` |
-| Both dflook actions' runtime image | `sha256:50305dd21908a624932ffd230fa9919bcd255eaed2f4854e565c31e5a0ea0332` |
+| OpenTofu Linux amd64 runtime | `ghcr.io/opentofu/opentofu:1.13.2@sha256:912846109c72b5d0ed514653648e6690d0b52f831766561fa605bd6d662cd1b0` |
+| configsctl extraction baseline | `26c05c9064ae273657d9d3a666d28f75a6f31711` |
 | actions/checkout | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
 | Shared Go CI | `agoodkind/go-makefile` at `bc41cecbc2b2d643d24e426a1ca104a4a4e3350a` |
 | GitHub acceptance provider | `integrations/github` version `6.13.0` |
@@ -25,15 +24,13 @@ Use these inspected versions initially. Update a pin only with the corresponding
 | Shared workflow Docker client | `github.com/moby/moby/client` `v0.6.2` |
 | cloudflared Linux amd64 | `2026.9.1`, SHA-256 `03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc` |
 
-Set `OPENTOFU_VERSION` explicitly. Install providers from the committed lock file and reject a changed lock file after initialization. Disable debug logging and user-supplied pre-run commands in credentialed jobs.
+Require `tofu version -json` to match the pinned version before initialization. Install providers from the committed lock file and reject a changed lock file after initialization. Disable debug logging and user-supplied pre-run commands in credentialed jobs.
 
-The inspected [plan entry point](https://github.com/dflook/terraform-github-actions/blob/dd5fb128af310eaa8050c9a19e908aa349a404cc/image/entrypoints/plan.sh) passes `-lock=false`. The [apply entry point](https://github.com/dflook/terraform-github-actions/blob/dd5fb128af310eaa8050c9a19e908aa349a404cc/image/entrypoints/apply.sh) accepts `plan_path`, locks during apply, and skips comparison with the PR preview when `auto_approve: true`.
-
-Require a nonempty existing `plan_path`. Pass that exact file to apply in the same job. Never fall back to an implicit plan inside apply. Reject backends that cannot produce a local saved plan.
+Use the public configsctl runner defined below. Require a nonempty existing saved plan and apply that exact file in the same job. Never fall back to an implicit plan inside apply. Reject backends that cannot produce a local saved plan.
 
 Use maintained libraries before adding an implementation. The [Go GitHub SDK](https://github.com/google/go-github/tree/1e7e5ad65e18b07e41636d9559c7d8de29f86576) supplies authentication, API types, services, pagination, and typed rate-limit errors. Keep only authorization, safe diagnostics, and bounded retry policy in the workflow adapter. Reuse standard artifact actions, native Actions concurrency, deployment records, Compose, and the existing provider libraries. Add custom code only for a verified requirement those components do not implement; do not add another queue service, state database, task tracker, scheduler, or plugin framework.
 
-The [disposable GitHub validation run](https://github.com/agoodkind/tofu-workflows/actions/runs/39814524494) passed checks for plan outputs, sensitive fixture redaction, exact saved-plan apply, and stale-plan rejection at source revision `7d546a5976e526f3dbe0f2e6179fa9d8a1684ab2`. It used only local OpenTofu resources on the GitHub runner. This establishes those upstream action behaviors; the queue, protected-environment integration, and application recovery still require the implementation acceptance tests below.
+The [upstream comparison run](https://github.com/agoodkind/tofu-workflows/actions/runs/39975479433) passed plan-output, redaction, exact saved-plan, and stale-plan checks. It establishes the compared dflook behavior, not the unimplemented configsctl CI extension. Keep those same public outcomes in the configsctl acceptance below.
 
 ## Define workspace and release inputs
 
@@ -120,7 +117,47 @@ type CheckIdentity struct {
 
 `StateID` identifies the actual backend and CLI workspace. For S3-compatible state, canonicalize endpoint, bucket, key, and workspace before hashing. Add a tested identity adapter before supporting another backend. Reject duplicate state identities. Require one consumer repository to own each managed state.
 
-Require positive `Parallelism` and pass it to the dflook plan/apply `parallelism` input. This controls concurrent resource operations within an environment and does not replace workflow-level release ordering. Consumers requiring serial resource updates select one.
+Require positive `Parallelism` and pass it to OpenTofu plan/apply through configsctl. This controls concurrent resource operations within an environment and does not replace workflow-level release ordering. Consumers requiring serial resource updates select one.
+
+## Reuse configsctl execution
+
+Extract the existing `executeTofu`, redaction writer, and process-group handling into public `goodkind.io/configsctl/tofurun`. Expose the existing lock implementation as `goodkind.io/configsctl/hostlock`. Preserve current local CLI behavior. The shared helper links these packages; it does not invoke dflook entrypoints or copy their command runner.
+
+Define these interfaces in configsctl:
+
+```go
+type OutputMode string
+const (
+    RedactedProgress OutputMode = "redacted_progress"
+    PrivateJSON OutputMode = "private_json"
+)
+type Request struct {
+    Binary, Root, Workspace string
+    Args, Environment, RequiredEnvironment, SecretEnvironment []string
+    SecretFiles map[string]string
+    OutputMode OutputMode
+    JSONPath string
+    RequiredHosts []string
+}
+type Result struct { ExitCode int; LogPath string }
+func Run(ctx context.Context, request Request, scope *hostlock.Scope) (Result, error)
+```
+
+`Binary` selects `/usr/local/bin/tofu` in the pinned image. Resolve `Root` beneath the validated checkout and require the declared existing CLI workspace. Initialize with `-input=false -lockfile=readonly` and the selected backend file, then select that workspace without creating it. Compare the provider lock digest after initialization. Plan with `-input=false -no-color -detailed-exitcode -parallelism=N -out=<private-plan>` and the declared variable files. Only read-only previews add `-lock=false`; deployment plans and applies retain backend locking. Apply with `-input=false -parallelism=N <exact-saved-plan>`. Saved-plan mode does not prompt or replan. Require a nonempty regular file, privately copy it before inspection, and use that same copy for apply. Preserve statuses zero, one, two, and crash status eleven.
+
+Construct `Environment` from the protected allowlist and ordinary `PATH`, `HOME`, `TMPDIR`, `LANG`, and `TF_IN_AUTOMATION` settings. Require `TF_IN_AUTOMATION=1` and a job-private HOME/TMPDIR. Never append the parent environment. Exclude GitHub and Access credentials, infrastructure-vault unlock credentials, unrelated management tokens, `TF_CLI_ARGS*`, `TF_LOG*`, `INPUT_*`, and pre-run hooks. Register declared secret values and exact `SecretFiles` contents with the existing redactor before starting a child. `SecretFiles` maps each allowed variable name to its installed protected pathname; require the matching environment assignment. Reject duplicate assignments, missing credentials, unmaskable secret values, secret-bearing command arguments, or file paths outside the private credential directory. Do not read the Configs vault or run Ansible inventory in this API.
+
+`RedactedProgress` streams redacted stdout and stderr into Actions and the existing private human-readable log. `PrivateJSON` permits only `show -json <saved-plan>`, creates `JSONPath` exclusively under the private job directory with mode 0600, and writes raw stdout only to that file. Redact stderr; do not change JSON bytes by string substitution. The reporter reads the private file and publishes only the permitted projection. Remove temporary plans and JSON after the job; never upload them.
+
+Add `(*hostlock.Set).Scope() (*Scope, error)`. Keep `Scope` fields private and bind it to the creating process, run, controller, active Set, and acquired host identities. Before mutation, `Run` rejects a nil, foreign-process, canceled, closed, expired, or incomplete-target scope. `CONFIGS_LOCK_STATE` does not authorize a bypass. Read-only preview uses a nil scope; only its nonmutating init, existing-workspace selection, plan, show, validate, and format checks are permitted. The environment action retains the original Set through checks, recovery, and cleanup and alone renews or releases it. Do not reacquire a shorter lease inside the runner.
+
+Add `configsctl ci tofu --config <file> --root <root> --workspace <workspace> -- <tofu argv>` as the read-only CLI adapter. Its strict JSON configuration contains `version: 1`, `required_environment`, `secret_environment`, `secret_files`, `output_mode`, and optional `json_path`. Environment lists contain allowed variable names, not values; resolve only those names plus the fixed ordinary process settings. `PrivateJSON` requires `json_path`. Reject duplicate/unknown fields and mutation commands. Dispatch `ci` before existing vault initialization. The shared workflow uses `tofurun.Run` with an acquired scope for mutation rather than adding a lock-bypass CLI flag.
+
+Use `signal.NotifyContext` for SIGINT/SIGTERM at CLI and workflow entrypoints and the existing `procgroup.RunGroup` twenty-second termination grace. Keep the independent cleanup context and uncertain remote-operation rules below. A process exit alone does not prove guest completion.
+
+Build both action images from the pinned official OpenTofu Linux amd64 image above, replace its entrypoint with the compiled helper, and copy only the trusted helper and verified cloudflared binary. Use the existing shared Go build for the helper. Pin the completed configsctl module revision after its acceptance passes; the extraction baseline is not an implemented API revision.
+
+## Define release manifests
 
 Accept scalar `string`, `number`, and `bool` release variables. Trusted configuration declares their names, kinds, allowed string values, and artifact repositories. Reject nulls, unexpected keys, executable arguments, configuration revisions, paths, and provider selections from release input.
 
@@ -160,7 +197,7 @@ Trusted check and cleanup containers share the supervisor's network namespace to
 
 ## Acquire compatible host locks
 
-An OpenTofu backend lock excludes other users of that state. It does not exclude an infrastructure or guest deployment using different state. Consumers with existing host locks must configure every affected guest and hypervisor in `HostLocks`. A `configsctl.yml` declaration alone does not acquire them when dflook runs directly.
+An OpenTofu backend lock excludes other users of that state. It does not exclude an infrastructure or guest deployment using different state. Consumers with existing host locks must configure every affected guest and hypervisor in `HostLocks`. The shared action must acquire them through configsctl before the fresh deployment plan.
 
 Install an administrator-owned fixed Go command in configsctl, `host-lock serve --principal ID`. SSH configuration supplies the principal and fixed command, disables shell/file transfer/forwarding, and permits only the protected host. Accept one JSON request of at most 4 KiB with `protocol_version`, `operation`, `run_id`, and `lease_seconds`. Accept `acquire`, `renew`, `release`, and `extend`; reject duplicate or unknown fields and caller-selected paths. Permit acquire/renew leases from one through 4200 seconds and extend requests from one through 900 seconds. Prefix stored run identities with the server's principal. The caller cannot renew or release another principal's lock.
 
@@ -168,11 +205,13 @@ Reuse the [existing configsctl lock protocol](https://github.com/agoodkind/confi
 
 Expose the existing configsctl `hostlock` package for external consumers and extend its existing `Set`, `AcquireAll`, `RenewAll`, `KeepRenewed`, and release implementation. Do not build a second `LeaseSet`. Add `OperationTransport.Do(ctx context.Context, host Host, request Request) (Response, error)`, with the existing typed operation/run/controller/lease fields and expiry/host-time reply. Add `AcquireAllWithOptions(ctx context.Context, hosts []Host, run, controller string, lease Lease, options Options) (*Set, error)`, where `Options` selects the transport, strict renewal failure, and per-request timeout. Preserve the old default API for existing callers. Add a checked release result for callers that must verify completion. Keep fixed-path filesystem operations and restricted SSH inside configsctl, not the shared workflow. Reuse its partial acquisition cleanup and renewal machinery, and publish/pin this extension before linking it into the workflow.
 
-Use a single environment-execution Docker action derived from the pinned dflook runtime image. Coordinate the fixed sequence with Go `context`, `os/exec`, and `errgroup`, using the existing lock library. Start the upstream plan/apply entrypoints, report the plan, record intent, check results, and perform recovery within one lock lifetime. Preserve upstream inputs, saved-plan paths, and GitHub output handling. Do not add a separate deployment controller or new shell scripts.
+Define `Request` with `Operation Operation`, `Run, Controller string`, and `Lease time.Duration`. Define `Response` with `HostTime, ExpiresAt time.Time`, and `Options` with `Transport OperationTransport`, `StrictRenewal bool`, and `RequestTimeout time.Duration`. `Operation` uses the four protocol values above. Retain the existing `Host` fields and add `ConnectAddress`, `PrivateKeyFile`, and `KnownHostsFile` strings for the restricted SSH transport. Its endpoint ignores caller-selected lock directories. Implement `(*Set).ReleaseAllChecked(ctx context.Context) error` and `(*Set).Abandon()`; abandon stops renewal and invalidates scopes without removing remote lock records. Preserve the old release method for existing callers. An acquired empty target set may produce a valid scope for consumers without host locks; backend locking still applies.
+
+Use one environment-execution Docker action containing the pinned OpenTofu executable, cloudflared, and compiled workflow helper. Link the helper to the completed configsctl public runner and lock packages. Run plan, reporting, recorded intent, apply, checks, recovery, and cleanup within one lock lifetime. Keep process execution in configsctl and deployment policy in the workflow. Do not add another supervisor, executable shim, deployment controller, or shell script.
 
 Acquire and renew 4200-second leases every sixty seconds. Bound each renewal request to ten seconds. Cancel supervised work on the first failed renewal. Tack's existing migration command permits 3600 seconds, plus thirty seconds of polling margin and five seconds for remote termination. It fits inside the 4130 seconds remaining after a failed renewal. Keep the legacy client's defaults unchanged. Its 900-second cap applies only to extend, and its renew preserves a later expiry. Never share the supervisor's run identity with a legacy acquire at a shorter duration, which could shorten that expiry. Reject a configured remote operation that exceeds the lease budget before execution.
 
-Hold host locks from the fresh deployment plan through apply, verification, recovery, and task cleanup. A local child-process exit does not prove that remote work stopped. Run an optional protected `CleanupCheck` on every exit with an independent bounded context. Cleanup reports success only after removing its owned temporary resources. Supply a standard GitHub Actions final cleanup step as a fallback. A resumed attempt cleans the ended runner's temporary project under the same locks before another mutation. Preserve existing deployment receipts; do not add a separate task tracker. Release early only after remote completion and cleanup; otherwise leave the recorded lease to expire and inspect before the next mutation. Committed graceful shutdown may continue completing admitted requests after expiry. Inspect its phase and refuse another replacement until that shutdown finishes. Read-only PR previews do not run mutating cleanup or acquire deployment host locks.
+Hold host locks from the fresh deployment plan through apply, verification, recovery, and task cleanup. A local child-process exit does not prove that remote work stopped. Run an optional protected `CleanupCheck` on every exit with an independent bounded context. Cleanup reports success only after removing its owned temporary resources. Supply a standard GitHub Actions final cleanup step as a fallback. That step reacquires only the same attempt identity and full lease after the main action terminates; a conflicting owner prevents cleanup. Derive the run identity from repository, workflow run ID, run attempt, and environment. A resumed attempt cleans the ended runner's temporary project under the same locks before another mutation. Preserve existing deployment receipts; do not add a separate task tracker. Release early only after remote completion and cleanup; otherwise leave the recorded lease to expire and inspect before the next mutation. Committed graceful shutdown may continue completing admitted requests after expiry. Inspect its phase and refuse another replacement until that shutdown finishes. Read-only PR previews do not run mutating cleanup or acquire deployment host locks.
 
 Test the complete supervisor with real SSH, filesystem locks, child processes, and shortened deadlines. Assert mutual exclusion with the unchanged client, renewal, partial acquisition cleanup, expiry, principal separation, wrong-owner release, cancellation, and incomplete remote work. Never force-unlock.
 
@@ -208,9 +247,9 @@ Use SDK error types and the established backoff library for at most three total 
 
 ## Apply and recover safely
 
-Within one environment job, generate a plan, require its plan and JSON files, validate changes, report the plan, record intent, and apply the saved `plan_path` with `auto_approve: true`. Keep the same configuration, variables, tool versions, working directory, and backend throughout the attempt. Keep raw plan files in that job.
+Within one environment job, generate a plan, require its plan and JSON files, validate changes, report the plan, record intent, and apply the exact saved plan through configsctl. Keep the same configuration, variables, tool versions, working directory, and backend throughout the attempt. Keep raw plan files in that job.
 
-Retry a `state-locked` failure within the configured bound. Never force-unlock. A failure after apply starts requires inspection; an error does not prove that resources remained unchanged.
+Set OpenTofu's `-lock-timeout=300s` for deployment plans, applies, and recovery. After that bound, report the lock failure without another implicit apply or force-unlock. A failure after apply starts requires inspection; an error does not prove that resources remained unchanged.
 
 Define `check.Observation` with `Healthy bool`, `ReleaseSHA string`, `Artifacts map[string]string`, `StateVersion string`, `PreviousCompatible bool`, and `ReasonCode string`. Accept reason codes `healthy`, `unhealthy`, `unreachable`, `identity-mismatch`, and `incompatible`. Trusted check containers report actual state in this format. Supply only named credential variables and a read-only expected-values file. Do not mount the checkout, Docker socket, or arbitrary host paths into a check container. Limit output to 64 KiB and reject invalid JSON or unknown fields without printing the raw response.
 
@@ -229,13 +268,13 @@ Verify health and artifact identities after recovery. Failed recovery stops late
 
 ## Report without races or secret disclosure
 
-The inspected dflook plan action does not publish PR comments for `workflow_run`. Set `add_github_comment: false` and format its outputs with the small Go reporter. Reuse dflook for OpenTofu execution.
+Publish results with the small Go reporter. Reuse configsctl for OpenTofu execution and the qualified JSON library for action counts and selected changes.
 
 Serialize report-producing jobs by repository, PR, and environment; keep other PRs independent. Compare the completed run's head SHA with the current PR head before updating a comment. Update only the configured Actions identity's comment with the exact hidden PR/environment marker. Never edit human comments. Preserve outdated runs without replacing the current comment.
 
 Decode supported plan fields with `terraform-json`, enabling `Plan.UseJSONNumber(true)` before decoding and validating the format. Publish only the selected change projection, never the full plan, variables, or prior state. Suppress marked sensitive subtrees and outputs. Collect string leaves at marked before/after and output paths, then mask matching strings in the display projection before formatting. Real OpenTofu output can copy such a value into an unmarked field; the library preserves the supplied masks but does not provide disclosure policy. Preserve unknown markers, limit displayed changes to 200 lines and each comment to 48 KiB, and link to the run. Count replacement separately from standalone create and delete actions. Escape untrusted text and strip terminal controls. Fail on an unsupported format rather than guessing its meaning.
 
-Publish checks against the verified PR head SHA, not the protected workflow's `github.sha`. Report errors as failures. Missing counts mean zero only when dflook explicitly returned `changes == false`; otherwise they are an error.
+Publish checks against the verified PR head SHA, not the protected workflow's `github.sha`. Report errors as failures. OpenTofu plan exit zero means unchanged and exit two means changed. Require a valid saved plan and JSON in either case; another exit or missing output means failure. Count supported actions from that JSON and reject unsupported actions.
 
 ## Test across real workflow runs
 

@@ -10,9 +10,9 @@ Keep the shared implementation in the public `agoodkind/tofu-workflows` reposito
 
 Run automation on GitHub-hosted runners. Use existing public actions for supported operations. Use Go for additional ordering and result handling. Use Dockerfiles and Docker Compose for container builds and service definitions when a caller needs them. Do not add custom shell scripts or a continuously running deployment controller.
 
-Use [dflook/tofu-plan](https://github.com/dflook/tofu-plan) and [dflook/tofu-apply](https://github.com/dflook/tofu-apply) for OpenTofu execution. Format their outputs with Go for PR reporting. Pin actions and container images to immutable revisions. Reusing an upstream action does not require copying its implementation into this repository.
+Reuse [configsctl](https://github.com/agoodkind/configsctl/tree/26c05c9064ae273657d9d3a666d28f75a6f31711) for OpenTofu execution, process cancellation, redaction, and existing host locks. Expose its existing Go implementation through a small public package with explicit CI inputs. Format plans with the qualified plan JSON library and Go reporter. Pin actions, executables, and container images to immutable revisions.
 
-For private connections and existing host locks, run a Go supervisor inside the pinned upstream runtime image. Keep fixed connection clients, plans, applies, checks, and recovery under that supervisor. Retain the upstream entrypoints and saved-plan behavior. Read-only PR previews use their own action container and separate identity.
+Keep fixed connection clients, plans, applies, checks, and recovery within one environment action. The existing configsctl lock implementation manages the complete lock lifetime; its runner executes OpenTofu. Shared workflow code supplies only release ordering, promotion, and recovery policy. Read-only PR previews use their own action container and separate identity.
 
 Implement shared automation independently from application provider resources. A consumer must supply working declarative deployment resources before automatic apply can update that application. Do not hide missing resources behind command triggers or a second deployment system.
 
@@ -26,9 +26,9 @@ The selected components and required extensions are:
 | --- | --- | --- |
 | GitHub requests | Maintained Go GitHub SDK | Repository authorization, safe errors, and bounded retry policy. |
 | Artifact transport | Official artifact actions and standard ZIP/JSON libraries | Verify producer identity and the bounded release-manifest contract. |
-| OpenTofu execution | Pinned dflook entrypoints | Translate protected inputs and verify the saved plan. |
+| OpenTofu execution | Existing configsctl runner and process cleanup | Add explicit CI credential/configuration inputs and verify the saved plan. |
 | Release ordering and persistence | Native concurrency, Git ancestry, and GitHub deployment records | Select unfinished merges in merge order and validate receipts. |
-| Host exclusion | Existing configsctl lock package | Add a restricted operation transport and strict renewal option. |
+| Host exclusion | Existing configsctl lock package | Expose its API, add a restricted operation transport, and select strict renewal. |
 | Compose state and updates | Compose libraries and Terraform Plugin Framework | Project selected public fields, import existing objects, and integrate readiness. |
 | Docker and registry access | Moby SDK, containerd resolver, and existing guest transport | Bound remote output and apply the metadata disclosure policy. |
 | Migration execution and cleanup | Existing Tack schema resource, migration helpers, and Compose | Bind the candidate image, enforce the deadline, and clean the separate task project. |
@@ -110,7 +110,7 @@ Process one selected release in this order:
 
 Use [saved-plan apply](https://opentofu.org/docs/cli/commands/apply/#saved-plan-mode) to execute the plan from that attempt. The merge authorizes normal deployment of the release. Routine replanning does not require another human approval or a new PR review.
 
-Configure dflook apply behavior for this authorization model. Its default comparison against the earlier PR plan must not block an otherwise authorized release merely because the preceding release changed the starting state. Preserve plan reporting and apply the exact plan generated for the current attempt.
+Apply the exact plan generated for the current attempt through configsctl. Do not compare it with the earlier PR preview as an additional approval gate.
 
 For QA followed by production, a failed QA apply or required check prevents the production apply for that release. Start production deployment automatically as soon as QA passes all required functional tests and health checks. Do not add a waiting period after those checks pass. Create separate plans for the separate environment states; do not reuse QA's plan file in production.
 
