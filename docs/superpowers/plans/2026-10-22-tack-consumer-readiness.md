@@ -12,6 +12,8 @@
 
 ## Global constraints
 
+- Create a dedicated Tack application deployment configuration with separate state for QA and production. It manages application releases and migrations.
+- Continue managing servers and shared guest setup through the existing infrastructure and guest workspaces.
 - Do not apply the whole Configs infrastructure or guest state to deploy a Tack application release.
 - Keep Configs merge-triggered deployment deferred.
 - Preserve existing resource identities, data volumes, database versions, and audit history during adoption.
