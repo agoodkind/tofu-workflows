@@ -1,0 +1,30 @@
+name: OpenTofu JSON library qualification
+on:
+  push:
+    branches: [codex/upstream-contract-proof]
+    paths:
+      - .github/workflows/plan-json-proof.yml
+      - proof/plan-json/**
+      - go.mod
+      - go.sum
+permissions:
+  contents: read
+  actions: read
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: opentofu/setup-opentofu@d1e6b1026dfcba594ff9f4ac8dd175208a16afd8
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+      - name: Qualify real plans and read current run metadata
+        run: go test -v ./proof/plan-json -count=1 -timeout=6m
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
