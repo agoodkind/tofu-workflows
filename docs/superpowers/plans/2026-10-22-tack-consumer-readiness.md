@@ -38,6 +38,8 @@ The inspected Tack revision `9efb81e0f8e5cf22e8710be773af0344f0901f6d` registers
 
 The provider also executes guest commands through the Proxmox API. A token that permits that operation does not establish a read-only planning identity. Resolve the actual permissions before enabling live PR plans.
 
+Use a dedicated planning login with a server-enforced fixed Go reader, as approved by the user. Return only approved deployment metadata, including image versions, declared nonsecret container settings, health, and applied migration version. Exclude passwords, application records, arbitrary commands, and file downloads. Enforce the fixed command and disable forwarding and interactive sessions in the server's SSH configuration. Keep the reader and its disclosure policy outside the planning account's write permissions. Supply planning jobs only this login's credential, never the Proxmox execution token or deployment credential. Providers must consume the restricted metadata response rather than a raw Docker API connection during planning. This reader inspects state; OpenTofu resources remain responsible for deployment.
+
 ## Reuse provider capabilities
 
 Source inspection establishes the following application-release mapping. It does not establish installed provider versions or successful deployment through these resources.
