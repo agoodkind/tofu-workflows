@@ -34,9 +34,40 @@ The existing roots have these responsibilities:
 | Guest configuration | `guest.tfstate` | Includes shared guest preparation and several Tack QA guests. |
 | Firmware | `firmware.tfstate` | Manages hardware firmware configuration. |
 
-The inspected Tack revision `2b1d90ea65519e978ce8e425f3228c9c0542593d` registers only `tack_schema`. That resource manages migrations. Ansible still installs application images. Neither finding establishes a complete Tack application workspace.
+The inspected Tack revision `9efb81e0f8e5cf22e8710be773af0344f0901f6d` registers only `tack_schema`. That resource manages migrations. Ansible still installs application images. Neither finding establishes a complete Tack application workspace.
 
 The provider also executes guest commands through the Proxmox API. A token that permits that operation does not establish a read-only planning identity. Resolve the actual permissions before enabling live PR plans.
+
+## Reuse provider capabilities
+
+Source inspection establishes the following application-release mapping. It does not establish installed provider versions or successful deployment through these resources.
+
+| Operation | Existing implementation | Required integration or correction |
+| --- | --- | --- |
+| Download the exact release image | `kreuzwerker/docker` provides `docker_image`, including digest references and retained local images. | Declare server and consumer digests from the release manifest. Download images before interrupting service and preserve the previous release for recovery. |
+| Read and replace application containers | `docker_container` manages image, command, mounts, ports, restart behavior, health checks, and import by container ID. | Define one owner for each application container. Preserve existing networks and volumes. Compare an adoption plan before allowing replacement. |
+| Connect to guest Docker | `pveguest-docker-socket` already exposes a local Unix socket backed by Proxmox guest execution. | Reuse this transport where compatible. Verify actual image pulls, inspection, replacement, and health polling against its buffered responses and command deadlines. |
+| Apply database migrations | Tack provides `tack_schema` with live version reads, pending migration reporting, import, guarded apply, and post-apply verification. | Separate candidate migration metadata from the currently installed Compose image. Keep the newer schema version during application recovery. |
+| Verify the installed release | `ops deploy verify` compares server and consumer image digests. `/healthz` checks FoundationDB and YugabyteDB. | Accept explicit instance and service targets instead of requiring both fixed container names on every guest. Check required functional behavior and audit consumption separately. |
+| Preserve availability across instances | Docker can wait for one container to become healthy. Tack performs HTTP shutdown with a ten-second deadline. | Coordinate removal from request routing, request completion, replacement, health verification, and return to routing for one instance at a time. Single-container health waiting does not implement this sequence. |
+
+Use existing Docker resources as the candidate implementation for ordinary container state. Do not add duplicate Tack image or container resources. This recommendation requires transport and adoption acceptance before selecting a provider version for deployment.
+
+The existing Docker bridge is not a credential boundary. Its `-get-only` option filters HTTP methods inside the client process, which still reads a Proxmox guest-execution token. It forwards permitted response bodies without field filtering. Restricting methods alone does not restrict access to container inspection data. Its guest requests have a 60-second command timeout and reject events and attached streams; long image pulls need explicit compatibility testing or a bounded transport correction before adoption.
+
+The upstream Docker provider also implements `docker_compose`. Its inspected `Read` checks whether project containers exist, while its planned content changes use a file hash. It does not implement import or compare individual live service fields in that resource. It therefore does not satisfy the approved field-level planning and adoption requirements unchanged. Retaining Compose as the configuration source requires an explicit mapping to managed fields or an upstream provider extension, not a command wrapper.
+
+The current migration reader runs `docker compose run --pull never tack-ops migrate --output json`. It starts a temporary container and reads migrations from the installed image. A new release can contain migrations that image does not include. Extend `tack_schema` to consume candidate migration metadata bound to the release digest, compare it with the live database version during planning, and execute that same candidate during apply. Preserve its expected-version check and verify the resulting version. Do not install the candidate before PR planning merely to discover its migrations.
+
+The Docker container reader also omits environment and label refresh. Full drift reporting for those fields requires a general provider correction. Passing passwords through its ordinary `env` configuration would put them in OpenTofu resource state; use protected runtime secret references under the separate credential design.
+
+Source evidence:
+
+- [Docker image resource](https://github.com/kreuzwerker/terraform-provider-docker/blob/f5b5f8c4aa7dd333d36f6cc5a4327d316a7d2e73/docs/resources/image.md) and [container resource](https://github.com/kreuzwerker/terraform-provider-docker/blob/f5b5f8c4aa7dd333d36f6cc5a4327d316a7d2e73/docs/resources/container.md) define the existing lifecycle inputs and import behavior.
+- [Docker container refresh](https://github.com/kreuzwerker/terraform-provider-docker/blob/f5b5f8c4aa7dd333d36f6cc5a4327d316a7d2e73/internal/provider/resource_docker_container_funcs.go#L889) omits environment and label refresh. [Compose resource implementation](https://github.com/kreuzwerker/terraform-provider-docker/blob/f5b5f8c4aa7dd333d36f6cc5a4327d316a7d2e73/internal/provider/resource_docker_compose.go#L158) checks project presence and hashes input files.
+- [Guest Docker bridge](https://github.com/agoodkind/terraform-provider-pveguest/blob/a1b623c7b6f9969033e5a91408a69cbb26917e62/cmd/pveguest-docker-socket/proxy.go) implements method filtering, buffered responses, and request limits.
+- [Tack migration commands](https://github.com/agoodkind/tack/blob/9efb81e0f8e5cf22e8710be773af0344f0901f6d/provider/internal/tackprovider/command.go) select the installed Compose image. [Schema apply](https://github.com/agoodkind/tack/blob/9efb81e0f8e5cf22e8710be773af0344f0901f6d/provider/internal/tackprovider/schema_apply.go) checks the planned image and verifies the final database version.
+- [Release verification](https://github.com/agoodkind/tack/blob/9efb81e0f8e5cf22e8710be773af0344f0901f6d/internal/ops/deploy_verify.go) requires fixed server and consumer container names. [Health probes](https://github.com/agoodkind/tack/blob/9efb81e0f8e5cf22e8710be773af0344f0901f6d/internal/runtime/graph_http.go) check the two databases. [Server shutdown](https://github.com/agoodkind/tack/blob/9efb81e0f8e5cf22e8710be773af0344f0901f6d/cmd/server/server_runtime.go) allows ten seconds for HTTP shutdown.
 
 ## Review focus
 
