@@ -65,6 +65,8 @@ Publish the candidate migration list during the build, as approved by the user. 
 
 The Docker container reader also omits environment and label refresh. Full drift reporting for those fields requires a general provider correction. Passing passwords through its ordinary `env` configuration would put them in OpenTofu resource state; use protected runtime secret references under the separate credential design.
 
+Extend `ops deploy verify`, as approved by the user, to accept expected services and image digests from the deployment configuration. Check every declared instance and report missing containers, incorrect images, and failed health checks individually. Support different service placements without requiring both fixed container names on every guest. Keep QA functional tests as a separate required check.
+
 Source evidence:
 
 - [Docker image resource](https://github.com/kreuzwerker/terraform-provider-docker/blob/f5b5f8c4aa7dd333d36f6cc5a4327d316a7d2e73/docs/resources/image.md) and [container resource](https://github.com/kreuzwerker/terraform-provider-docker/blob/f5b5f8c4aa7dd333d36f6cc5a4327d316a7d2e73/docs/resources/container.md) define the existing lifecycle inputs and import behavior.
