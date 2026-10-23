@@ -222,4 +222,3 @@ Implement `NewController(instanceID, generation string) *Controller`, `Track(nex
 ## Completion criteria
 
 Implementation planning is complete when these contracts, the shared workflow plan, and the recorded decisions agree. Implementation is complete only after the named public-boundary acceptance tests pass. Production readiness additionally requires the actual guest transport, protected account configuration, backend permissions, and installed application checks. The disposable tests do not claim those results.
-
