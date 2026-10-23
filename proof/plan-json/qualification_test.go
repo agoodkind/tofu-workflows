@@ -23,7 +23,12 @@ func tofu(t *testing.T, directory string, environment []string, args ...string) 
 	t.Helper()
 	command := exec.CommandContext(t.Context(), "tofu", args...)
 	command.Dir = directory
-	command.Env = append(os.Environ(), environment...)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GITHUB_TOKEN=") {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	command.Env = append(command.Env, environment...)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
@@ -153,8 +158,8 @@ func assertRedaction(t *testing.T, value *tfjson.Plan, confidential string) {
 	if bytes.Contains(display, []byte(confidential)) {
 		t.Fatal("The redacted projection contains the synthetic sensitive value")
 	}
-	if !bytes.Contains(display, []byte("visible-item")) || !bytes.Contains(display, []byte("<sensitive>")) {
-		t.Fatal("The projection did not preserve public values and sensitive markers")
+	if !bytes.Contains(display, []byte("visible-item")) || !bytes.Contains(display, []byte("<sensitive>")) || !bytes.Contains(display, []byte("<unknown>")) {
+		t.Fatal("The projection did not preserve public values, sensitivity, and unknown markers")
 	}
 }
 
@@ -184,6 +189,9 @@ func TestRealOpenTofuPlansPreserveActionsMasksAndUnknowns(t *testing.T) {
 		}
 	}
 	firstApp := change(t, first, "terraform_data.app")
+	if original, ok := child(child(child(firstApp.After, "input"), "nested"), "private").(string); !ok || original != confidential {
+		t.Fatal("The library did not preserve the synthetic value before redaction")
+	}
 	if !pathMarked(firstApp.AfterUnknown, "id") || !pathMarked(firstApp.AfterUnknown, "output") {
 		t.Fatal("The library omitted initial computed unknown markers")
 	}
