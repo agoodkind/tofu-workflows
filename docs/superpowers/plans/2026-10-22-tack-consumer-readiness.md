@@ -18,7 +18,7 @@
 - Keep Configs merge-triggered deployment deferred.
 - Preserve existing resource identities, data volumes, database versions, and audit history during adoption.
 - Complete runtime auditing before enabling automatic Tack deployment.
-- Allow a brief restart outage when the deployment configures one application instance. The user reports that the current deployment has one instance.
+- Allow a planned restart outage of at most 60 seconds when the deployment configures one application instance. The user reports that the current deployment has one instance.
 - Preserve service availability during deployments with multiple configured application instances. Update one instance at a time and verify its readiness before updating the next. An unhealthy instance does not permit the deployment to use the single-instance outage exception.
 - Do not introduce a second deployment command outside managed provider resources.
 
@@ -70,7 +70,7 @@ This provider implementation is existing unfinished work, not a generic workflow
 - [ ] Configure the shared workflow using the verified application roots and immutable provider lock files.
 - [ ] Implement trusted health and inspection commands that return the shared observation contract from real running services.
 - [ ] Test a normal release, a QA failure, a production health failure, compatible recovery, and interrupted apply on disposable infrastructure.
-- [ ] Verify a single-instance release restarts successfully within the agreed interruption limit. Verify a multiple-instance release serves requests throughout the update and waits for each updated instance to become ready before updating another. Verify an unhealthy instance prevents an update that would interrupt service.
+- [ ] Verify a single-instance release restores service within 60 seconds after service interruption begins. Verify a multiple-instance release serves requests throughout the update and waits for each updated instance to become ready before updating another. Verify an unhealthy instance prevents an update that would interrupt service.
 - [ ] Verify exact installed images and runtime audit records. Only then enable automatic production deployment after the audit work completes.
 
 ## Planning status
