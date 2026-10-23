@@ -156,11 +156,30 @@ func assertRedaction(t *testing.T, value *tfjson.Plan, confidential string) {
 	}
 	display := rendered.Bytes()
 	if bytes.Contains(display, []byte(confidential)) {
-		t.Fatal("The redacted projection contains the synthetic sensitive value")
+		t.Fatalf("The redacted projection retains the synthetic value at field paths %v", matchingPaths(visible, confidential, ""))
 	}
 	if !bytes.Contains(display, []byte("visible-item")) || !bytes.Contains(display, []byte("<sensitive>")) || !bytes.Contains(display, []byte("<unknown>")) {
 		t.Fatal("The projection did not preserve public values, sensitivity, and unknown markers")
 	}
+}
+
+func matchingPaths(value any, confidential, path string) []string {
+	var found []string
+	switch current := value.(type) {
+	case string:
+		if strings.Contains(current, confidential) {
+			found = append(found, path)
+		}
+	case map[string]any:
+		for key, item := range current {
+			found = append(found, matchingPaths(item, confidential, path+"."+key)...)
+		}
+	case []any:
+		for index, item := range current {
+			found = append(found, matchingPaths(item, confidential, path+"["+strconv.Itoa(index)+"]")...)
+		}
+	}
+	return found
 }
 
 func TestRealOpenTofuPlansPreserveActionsMasksAndUnknowns(t *testing.T) {
