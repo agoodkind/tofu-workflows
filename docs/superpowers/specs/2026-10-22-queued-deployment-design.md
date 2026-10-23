@@ -16,6 +16,27 @@ For private connections and existing host locks, run a Go supervisor inside the 
 
 Implement shared automation independently from application provider resources. A consumer must supply working declarative deployment resources before automatic apply can update that application. Do not hide missing resources behind command triggers or a second deployment system.
 
+## Reuse established components
+
+Use existing tools and libraries before building custom infrastructure. Extend the current component for a verified missing behavior. Keep the remaining adaptation small and prove the requirement that makes it necessary.
+
+The selected components and required extensions are:
+
+| Work | Existing component | Necessary adaptation |
+| --- | --- | --- |
+| GitHub requests | Maintained Go GitHub SDK | Repository authorization, safe errors, and bounded retry policy. |
+| Artifact transport | Official artifact actions and standard ZIP/JSON libraries | Verify producer identity and the bounded release-manifest contract. |
+| OpenTofu execution | Pinned dflook entrypoints | Translate protected inputs and verify the saved plan. |
+| Release ordering and persistence | Native concurrency, Git ancestry, and GitHub deployment records | Select unfinished merges in merge order and validate receipts. |
+| Host exclusion | Existing configsctl lock package | Add a restricted operation transport and strict renewal option. |
+| Compose state and updates | Compose libraries and Terraform Plugin Framework | Project selected public fields, import existing objects, and integrate readiness. |
+| Docker and registry access | Moby SDK, containerd resolver, and existing guest transport | Bound remote output and apply the metadata disclosure policy. |
+| Migration execution and cleanup | Existing Tack schema resource, migration helpers, and Compose | Bind the candidate image, enforce the deadline, and clean the separate task project. |
+| Availability | Traefik readiness and Go HTTP shutdown | Add reversible preparation before committing shutdown. |
+| Backend credentials | R2 bucket permissions and protected GitHub environment secrets | Bind each planning/applying role to its own environment. |
+
+The merge-order selector remains necessary because native concurrency orders arrivals rather than merged commits. Restricted metadata remains necessary because Docker inspection includes secrets. Reversible preparation remains necessary because HTTP shutdown cannot restore a server after it begins. These extensions do not require another queue, database, task tracker, or continuously running controller.
+
 ## Accept a consumer configuration
 
 Each consumer supplies a deployment set with two ordered environments: validation and production. Consumers choose the display labels, such as QA. A deployment set identifies resources that must not change concurrently. Separate deployment sets may run independently only when their state and managed resources do not overlap.

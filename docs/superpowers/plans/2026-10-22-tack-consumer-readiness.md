@@ -106,18 +106,22 @@ Source evidence:
 - Recovery lowers the desired schema version: reject the recovery plan.
 - A generic workflow test passes: still require Tack's own installed-image, runtime, and audit evidence.
 
-## Select unattended state credentials
+## Use independent state buckets
 
-The current application plan uses separate keys in the existing `tofu-state` bucket. Cloudflare's [permanent R2 credentials](https://developers.cloudflare.com/r2/api/tokens/) can restrict access to whole buckets. Exact-object and prefix restrictions require [temporary credentials](https://developers.cloudflare.com/r2/api/s3/temporary-credentials/), which expire and require a parent credential for renewal. Keep that broad parent credential outside GitHub runners.
+Use separate private R2 buckets with [bucket-scoped credentials](https://developers.cloudflare.com/r2/api/tokens/), as selected by the user. Each environment has a read-only planning identity and a separate applying identity. The workflow does not require a credential issuer.
 
-The remaining choice changes Task 6's storage configuration:
+The selected storage and GitHub environments are:
 
-1. Use a separate state bucket for QA and production with a permanent credential restricted to each bucket. Preserve the selected state filenames and encryption. This avoids a credential issuer.
-2. Keep the shared bucket and install a fixed Go credential issuer on an existing protected host. The issuer authenticates each planning or applying identity and returns only its short-lived session. It exits after each request and does not require another daemon or container.
+| Bucket | State key | Planning environment | Applying environment |
+| --- | --- | --- | --- |
+| `tofu-state-tack-qa` | `tack-qa.tfstate` | `tack-qa-plan` | `tack-qa-apply` |
+| `tofu-state-tack-prod` | `tack-prod.tfstate` | `tack-prod-plan` | `tack-prod-apply` |
 
-Separate buckets require four user-owned R2 tokens: one read-only planning token and one applying token per environment. The supplied mint-only capability supports this route. Complete bucket creation and other control-plane operations, then revoke their temporary provisioning token before creating the final four identities. The disposable proof verified that this sequence fits the current user-token quota without deleting unrelated credentials. Check total records, including expired tokens, before beginning final provisioning.
+Provisioning verified both private buckets and all four credential policies on October 23, 2026. Every identity could read only its own bucket. Planning identities could not write state, delete objects, or create locks. Applying identities could write their own bucket. Cross-bucket operations failed. Cleanup removed the synthetic objects and temporary administrator; the intended buckets and four operational identities remain configured.
 
-Recommend the separate buckets for the smaller implementation. The current plan does not select either option until the user answers this choice. Do not treat temporary test credentials as an unattended deployment credential system.
+Each GitHub environment now contains `TF_BACKEND_ENV`, a JSON bundle containing `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `TF_VAR_vault_tofu_state_passphrase`. QA and production use independent random 256-bit state-encryption passphrases. These new application keys do not come from the existing infrastructure vault. Supply provider authentication separately through `TF_PROVIDER_ENV` when implementing the workflow.
+
+The buckets remain empty before state adoption. The operational tokens do not expire automatically. Provisioning verified the secret metadata and removed local credential copies. This establishes backend provisioning, not application import or deployment.
 
 ## Implement the approved design
 
