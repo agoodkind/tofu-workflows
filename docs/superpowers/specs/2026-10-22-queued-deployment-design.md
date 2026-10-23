@@ -89,7 +89,7 @@ Use [saved-plan apply](https://opentofu.org/docs/cli/commands/apply/#saved-plan-
 
 Configure dflook apply behavior for this authorization model. Its default comparison against the earlier PR plan must not block an otherwise authorized release merely because the preceding release changed the starting state. Preserve plan reporting and apply the exact plan generated for the current attempt.
 
-For QA followed by production, a failed QA apply or health check prevents the production apply for that release. A passing QA result permits production automatically. Create separate plans for the separate environment states; do not reuse QA's plan file in production.
+For QA followed by production, a failed QA apply or required check prevents the production apply for that release. Start production deployment automatically as soon as QA passes all required functional tests and health checks. Do not add a waiting period after those checks pass. Create separate plans for the separate environment states; do not reuse QA's plan file in production.
 
 ## Recover from a failed deployment
 
@@ -128,6 +128,7 @@ Acceptance must establish:
 | Missing or repeated trigger | Reconciliation discovers missing work; a repeated trigger does not repeat a completed apply. |
 | State changes after a PR preview | The deployment reports and applies a fresh plan without another routine approval. |
 | QA failure | Production does not change for that release. |
+| QA success | Production starts after all required QA checks pass, without an added waiting period. |
 | Production health failure | Recovery restores and verifies the previous compatible application version. |
 | Failed recovery | Later releases for that deployment set remain stopped with the failure visible. |
 | Runner interruption | A new run determines actual state before resuming or recovering. |
