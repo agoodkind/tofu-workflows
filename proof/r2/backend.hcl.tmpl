@@ -4,7 +4,7 @@ region = "auto"
 endpoints = { s3 = "{{.Endpoint}}" }
 use_lockfile = true
 use_path_style = true
-workspace_key_prefix = "proof/workspaces"
+workspace_key_prefix = "{{.WorkspacePrefix}}"
 skip_credentials_validation = true
 skip_region_validation = true
 skip_requesting_account_id = true

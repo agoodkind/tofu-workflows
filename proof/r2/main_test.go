@@ -107,7 +107,7 @@ func root(t *testing.T, base, name, endpoint string) string {
 		t.Fatal(err)
 	}
 	var backend bytes.Buffer
-	inputs := struct{ Key, Endpoint string }{"proof/" + name + ".tfstate", endpoint}
+	inputs := struct{ Key, Endpoint, WorkspacePrefix string }{name + ".tfstate", endpoint, name + "-workspaces"}
 	if err := tmpl.Execute(&backend, inputs); err != nil {
 		t.Fatal(err)
 	}
@@ -124,9 +124,18 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 	}
 	key := randomText(t)
 	s := storage{endpoint: endpoint, access: access, secret: secret, token: token}
+	prodAccess, prodSecret, prodToken := os.Getenv("R2_PROD_ACCESS_KEY_ID"), os.Getenv("R2_PROD_SECRET_ACCESS_KEY"), os.Getenv("R2_PROD_SESSION_TOKEN")
+	if prodAccess == "" || prodSecret == "" || prodToken == "" {
+		t.Fatal("Separate production proof credentials are required")
+	}
+	prodStorage := storage{endpoint, prodAccess, prodSecret, prodToken}
 	t.Cleanup(func() {
 		for _, name := range []string{"tack-qa.tfstate", "tack-prod.tfstate", "tack-qa.tfstate.tflock", "tack-prod.tfstate.tflock"} {
-			status, _, err := s.request("DELETE", "/"+bucket+"/proof/"+name, nil)
+			client := s
+			if strings.HasPrefix(name, "tack-prod") {
+				client = prodStorage
+			}
+			status, _, err := client.request("DELETE", "/"+bucket+"/"+name, nil)
 			if err != nil || status != 204 {
 				t.Errorf("Synthetic object cleanup failed: key=%s status=%d", name, status)
 			}
@@ -141,10 +150,30 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 	if status, _, err := s.request("GET", "/"+bucket+"?list-type=2&prefix=denied%2F", nil); err != nil || status != 403 {
 		t.Fatalf("Out-of-scope list expected403: status=%d err=%v", status, err)
 	}
-	if status, _, err := s.request("GET", "/"+bucket+"?list-type=2&prefix=proof%2F", nil); err != nil || status != 200 {
+	if status, _, err := s.request("GET", "/"+bucket+"?list-type=2&prefix=tack-qa-workspaces%2F", nil); err != nil || status != 200 {
 		t.Fatalf("Scoped list expected200: status=%d err=%v", status, err)
 	}
-	t.Log("Scoped listing succeeded; out-of-scope synthetic reads, writes, and listing returned403")
+
+	for _, entry := range []struct {
+		client storage
+		other  string
+	}{{s, "tack-prod"}, {prodStorage, "tack-qa"}} {
+		for _, method := range []string{"GET", "PUT"} {
+			status, _, err := entry.client.request(method, "/"+bucket+"/"+entry.other+".tfstate", []byte("synthetic-denied"))
+			if err != nil || status != 403 {
+				t.Fatalf("Cross-environment %s expected403: status=%d", method, status)
+			}
+		}
+		status, _, err := entry.client.request("GET", "/"+bucket+"?list-type=2&prefix="+entry.other+"-workspaces%2F", nil)
+		if err != nil || status != 403 {
+			t.Fatalf("Cross-environment listing expected403: status=%d", status)
+		}
+	}
+	if status, _, err := s.request("GET", "/"+bucket+"?list-type=2", nil); err != nil || status != 403 {
+		t.Fatalf("Unscoped bucket list expected403: status=%d", status)
+	}
+	t.Log("Exact state-object grants and workspace prefixes allow scoped listing; both environments reject other-environment reads, writes, and listing; root listing returns403")
+
 	base := t.TempDir()
 	qa := root(t, base, "tack-qa", s.endpoint)
 	prod := root(t, base, "tack-prod", s.endpoint)
@@ -157,8 +186,13 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 		cleanEnvironment = append(cleanEnvironment, entry)
 	}
 	environment := append(cleanEnvironment, "AWS_ACCESS_KEY_ID="+access, assignment("AWS_SECRET_ACCESS_KEY", secret), "AWS_SESSION_TOKEN="+token, "AWS_EC2_METADATA_DISABLED=true", "TF_VAR_vault_tofu_state_passphrase="+key, "TF_VAR_payload="+payload)
+	prodEnvironment := append(append([]string{}, environment...), assignment("AWS_ACCESS_KEY_ID", prodAccess), assignment("AWS_SECRET_ACCESS_KEY", prodSecret), assignment("AWS_SESSION_TOKEN", prodToken))
 	for _, dir := range []string{qa, prod} {
-		if output, err := tofu(dir, environment, "init", "-backend-config=backend.hcl", "-input=false", "-no-color"); err != nil {
+		runEnvironment := environment
+		if dir == prod {
+			runEnvironment = prodEnvironment
+		}
+		if output, err := tofu(dir, runEnvironment, "init", "-backend-config=backend.hcl", "-input=false", "-no-color"); err != nil {
 			t.Fatalf("init failed: %v: %s", err, output)
 		}
 		if output, err := tofu(dir, environment, "plan", "-out=release.plan", "-input=false", "-no-color"); err != nil {
@@ -175,11 +209,11 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 			t.Fatalf("apply failed: %v: %s", err, output)
 		}
 	}
-	_, qaState, err := s.request("GET", "/"+bucket+"/proof/tack-qa.tfstate", nil)
+	_, qaState, err := s.request("GET", "/"+bucket+"/tack-qa.tfstate", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, prodState, err := s.request("GET", "/"+bucket+"/proof/tack-prod.tfstate", nil)
+	_, prodState, err := prodStorage.request("GET", "/"+bucket+"/tack-prod.tfstate", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +258,7 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 	}
 	locked := false
 	for attempt := 0; attempt < 100; attempt++ {
-		status, _, err := s.request("GET", "/"+bucket+"/proof/tack-qa.tfstate.tflock", nil)
+		status, _, err := s.request("GET", "/"+bucket+"/tack-qa.tfstate.tflock", nil)
 		if err == nil && status == 200 {
 			locked = true
 			break
@@ -241,19 +275,19 @@ func TestEncryptedR2StateAndLocks(t *testing.T) {
 	if err == nil || !bytes.Contains(output, []byte("Error acquiring the state lock")) {
 		t.Fatal("concurrent plan did not reject the held QA lock")
 	}
-	if output, err := tofu(prod, environment, "plan", "-lock-timeout=0s", "-input=false", "-no-color"); err != nil {
+	if output, err := tofu(prod, prodEnvironment, "plan", "-lock-timeout=0s", "-input=false", "-no-color"); err != nil {
 		t.Fatalf("production key blocked by QA lock: %v: %s", err, output)
 	}
 	input.Write([]byte("no\n"))
 	input.Close()
 	holder.Wait()
-	if status, _, err := s.request("GET", "/"+bucket+"/proof/tack-qa.tfstate.tflock", nil); err != nil || status != 404 {
+	if status, _, err := s.request("GET", "/"+bucket+"/tack-qa.tfstate.tflock", nil); err != nil || status != 404 {
 		t.Fatalf("canceled apply did not release lock: status=%d err=%v", status, err)
 	}
 	if output, err := tofu(qa, environment, "plan", "-input=false", "-no-color"); err != nil {
 		t.Fatalf("QA could not plan after normal lock release: %v: %s", err, output)
 	}
-	_, prodAfter, err := s.request("GET", "/"+bucket+"/proof/tack-prod.tfstate", nil)
+	_, prodAfter, err := prodStorage.request("GET", "/"+bucket+"/tack-prod.tfstate", nil)
 	if err != nil || !bytes.Equal(prodState, prodAfter) {
 		t.Fatal("QA operations changed production state")
 	}
