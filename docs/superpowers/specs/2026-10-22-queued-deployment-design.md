@@ -10,7 +10,9 @@ Keep the shared implementation in the public `agoodkind/tofu-workflows` reposito
 
 Run automation on GitHub-hosted runners. Use existing public actions for supported operations. Use Go for additional ordering and result handling. Use Dockerfiles and Docker Compose for container builds and service definitions when a caller needs them. Do not add custom shell scripts or a continuously running deployment controller.
 
-Use [dflook/tofu-plan](https://github.com/dflook/tofu-plan) and [dflook/tofu-apply](https://github.com/dflook/tofu-apply) for OpenTofu execution and PR reporting. Pin actions and container images to immutable revisions. Reusing an upstream action does not require copying its implementation into this repository.
+Use [dflook/tofu-plan](https://github.com/dflook/tofu-plan) and [dflook/tofu-apply](https://github.com/dflook/tofu-apply) for OpenTofu execution. Format their outputs with Go for PR reporting. Pin actions and container images to immutable revisions. Reusing an upstream action does not require copying its implementation into this repository.
+
+For private connections and existing host locks, run a Go supervisor inside the pinned upstream runtime image. Keep fixed connection clients, plans, applies, checks, and recovery under that supervisor. Retain the upstream entrypoints and saved-plan behavior. Read-only PR previews use their own action container and separate identity.
 
 Implement shared automation independently from application provider resources. A consumer must supply working declarative deployment resources before automatic apply can update that application. Do not hide missing resources behind command triggers or a second deployment system.
 

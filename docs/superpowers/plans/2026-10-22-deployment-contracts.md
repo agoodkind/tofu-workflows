@@ -16,6 +16,7 @@ Use these inspected versions initially. Update a pin only with the corresponding
 | actions/checkout | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
 | Shared Go CI | `agoodkind/go-makefile` at `bc41cecbc2b2d643d24e426a1ca104a4a4e3350a` |
 | GitHub acceptance provider | `integrations/github` version `6.13.0` |
+| cloudflared Linux amd64 | `2026.9.1`, SHA-256 `03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc` |
 
 Set `OPENTOFU_VERSION` explicitly. Install providers from the committed lock file and reject a changed lock file after initialization. Disable debug logging and user-supplied pre-run commands in credentialed jobs.
 
@@ -48,8 +49,11 @@ type Environment struct {
     BackendFile string
     StateID string
     Parallelism int
+    AccessTunnels []AccessTunnel
+    HostLocks []HostLockTarget
     VariableFiles []string
     SecretEnvNames []string
+    SecretFiles map[string]string
     HealthCheck Check
     InspectCheck Check
     RecoveryVariableNames []string
@@ -61,6 +65,21 @@ type Check struct {
     Arguments []string
     TimeoutSeconds int
     SecretEnvNames []string
+}
+type AccessTunnel struct {
+    ID string
+    Hostname string
+    LocalPort int
+    ClientIDEnv string
+    ClientSecretEnv string
+}
+type HostLockTarget struct {
+    ID string
+    Address string
+    ConnectAddress string
+    User string
+    PrivateKeyFile string
+    KnownHostsFile string
 }
 type VariableRule struct {
     Kind string
@@ -106,9 +125,43 @@ Execute only the protected configuration revision, pinned providers, pinned shar
 
 Set `environment` on reusable workflow jobs. Declare the secret `TF_PROVIDER_ENV`, require the caller to pass that name, and check its effective environment-specific value inside the called job. Do not use blanket `secrets: inherit`.
 
-Implement `credentials.Install(raw string, allowed []string, environmentFile string) error`. Decode a JSON map and permit only trusted `SecretEnvNames`. Reject `PATH`, `GITHUB_*`, `ACTIONS_*`, `INPUT_*`, `TF_CLI_ARGS*`, `TF_LOG*`, and `TERRAFORM_PRE_RUN`. Register masking before writing values through the runner environment file. Do not print the map or export it as a job output. Missing values fail before initialization.
+Implement `credentials.Install(raw string, allowed []string, files map[string]string, environmentFile string) error`. Decode a JSON map and permit only trusted `SecretEnvNames`. Reject `PATH`, `GITHUB_*`, `ACTIONS_*`, `INPUT_*`, `TF_CLI_ARGS*`, `TF_LOG*`, and `TERRAFORM_PRE_RUN`. Register masking before writing values through the runner environment file. Encode multiline values with a fresh delimiter that does not occur in the value. Do not print the map or export it as a job output. Missing values fail before initialization.
+
+Use `SecretFiles` to map an allowed variable to its protected job-temporary pathname. Write that value into a mode-0600 file under a mode-0700 directory and export only its pathname under the original variable name. Use this binding for private SSH keys. Require paths beneath the dedicated runner-temporary credential directory, reject existing/symlink targets, and remove the files after the action. Keep the provider's configured key-file references consistent with these paths. Test the actual key file, permissions, cleanup, and absence of key bytes from the environment file.
 
 Use separate planning and applying identities. Planning credentials must not permit unrestricted commands or resource mutation. Verify this property against each consumer's actual provider transport before enabling live planning.
+
+## Connect through fixed Access endpoints
+
+Use Cloudflare Access TCP forwarding for consumers with private endpoints. Each protected `AccessTunnel` selects one hostname and a unique loopback port. Cloudflare Tunnel configuration fixes the origin; requests cannot select another destination. Provision exact-service-token Access policies before publishing DNS. Keep planning and applying service identities separate, and permit each only on its declared applications.
+
+Run a pinned `cloudflared access tcp` subprocess inside the same action container as OpenTofu. Bind only `127.0.0.1` on the configured port. Supply the two named credential variables only to that subprocess and stop it during cleanup. Do not give the runner a tunnel management token, a zone-management token, or private-network enrollment credentials. Require successful authorized connection within thirty seconds before planning or applying.
+
+Download the pinned client from its [official release asset](https://github.com/cloudflare/cloudflared/releases/download/2026.9.1/cloudflared-linux-amd64) and verify the recorded SHA-256 before including it in the action image. The pinned Linux image uses this architecture; another architecture requires its own verified asset.
+
+Preserve endpoint identity independently from the socket address. HTTPS clients retain the original URL hostname and verify its certificate while dialing the local listener. SSH clients verify the original target's pinned host key while dialing the local listener. Never disable verification or select a different User-Agent to evade an HTTP challenge. The disposable test found a browser challenge on the published HTTP route; TCP forwarding permits the normal Go client and end-to-end origin TLS.
+
+Define `access.Start(ctx context.Context, tunnels []config.AccessTunnel) (*Session, error)` and `(*Session).Close() error` in `internal/access`. Validate hostname, unique port, and allowed credential-variable references before starting any process. Return an error if a listener exits during the operation. Keep protected provider connection settings consistent with these fixed ports; release input cannot change them.
+
+Trusted check containers share only the supervisor's network namespace to use the same loopback listeners. Pass their explicit credential allowlist and expected-values file separately. Do not mount the supervisor's Docker socket, configuration checkout, or credential files into them. Resolve the expected file's Docker-host path from the supervisor's own mount metadata before making its read-only bind; a container-local pathname does not identify a host file. GitHub's [container-action implementation](https://github.com/actions/runner/blob/main/src/Runner.Worker/Handlers/ContainerActionHandler.cs) supplies the supervisor's Docker socket and workspace mounts.
+
+## Acquire compatible host locks
+
+An OpenTofu backend lock excludes other users of that state. It does not exclude an infrastructure or guest deployment using different state. Consumers with existing host locks must configure every affected guest and hypervisor in `HostLocks`. A `configsctl.yml` declaration alone does not acquire them when dflook runs directly.
+
+Install an administrator-owned fixed Go command in configsctl, `host-lock serve --principal ID`. SSH configuration supplies the principal and fixed command, disables shell/file transfer/forwarding, and permits only the protected host. Accept one JSON request of at most 4 KiB with `protocol_version`, `operation`, `run_id`, and `lease_seconds`. Accept `acquire`, `renew`, `release`, and `extend`; reject duplicate or unknown fields, caller-selected paths, and leases outside one through nine hundred seconds. Prefix stored run identities with the server's principal. The caller cannot renew or release another principal's lock.
+
+Reuse the [existing configsctl lock protocol](https://github.com/agoodkind/configsctl/blob/26c05c9064ae273657d9d3a666d28f75a6f31711/internal/hostlock/lock.sh): the fixed lock file, boot-specific atomic directory guard, three-field record, expiry rules, and matching-owner release. Reject symlink paths, malformed records, and nonempty stale guards without deleting their contents. Return bounded status codes plus the host time and expiry. Local disposable interoperability tests established that the unchanged client and a fixed Go helper exclude each other.
+
+Define `LeaseSet.AcquireAll(ctx context.Context, targets []config.HostLockTarget, runID string) error`, `(*LeaseSet).RenewAll(ctx context.Context) error`, and `(*LeaseSet).ReleaseAll(ctx context.Context) error` in `internal/hostlock`. Acquire sorted targets and release partial acquisition after contention. Pin SSH host keys and retain their original identity when `ConnectAddress` selects an Access listener.
+
+Use a single environment-execution Docker action derived from the pinned dflook runtime image. Its Go supervisor starts the existing upstream plan/apply entrypoints, reports the plan, records intent, checks results, and performs recovery within one lock lifetime. Preserve upstream inputs, saved-plan paths, and GitHub output handling. Do not add a separate deployment controller or new shell scripts.
+
+Acquire and renew nine-hundred-second leases every sixty seconds. Bound each renewal request to ten seconds. Cancel supervised work on the first failed renewal. The longest permitted guest command takes six hundred seconds plus thirty seconds of polling margin and five seconds for remote termination; it fits inside the remaining lease after a failed renewal. Keep the legacy client's defaults unchanged. Reject a consumer operation that exceeds this lease budget before execution.
+
+Hold host locks from the fresh deployment plan through apply, verification, and recovery. A local child-process exit does not prove that remote work stopped. Release early only after remote completion; otherwise leave the recorded lease to expire and inspect before the next mutation. Committed graceful shutdown may continue completing admitted requests after expiry. Inspect its phase and refuse another replacement until that shutdown finishes. Read-only PR previews do not acquire deployment host locks.
+
+Test the complete supervisor with real SSH, filesystem locks, child processes, and shortened deadlines. Assert mutual exclusion with the unchanged client, renewal, partial acquisition cleanup, expiry, principal separation, wrong-owner release, cancellation, and incomplete remote work. Never force-unlock.
 
 ## Persist deployment outcomes
 

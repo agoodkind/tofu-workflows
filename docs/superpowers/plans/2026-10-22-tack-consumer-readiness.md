@@ -18,13 +18,13 @@
 - Keep Configs merge-triggered deployment deferred.
 - Preserve existing resource identities, data volumes, database versions, and audit history during adoption.
 - Complete runtime auditing before enabling automatic Tack deployment.
-- Allow a planned restart outage of at most 60 seconds when the deployment configures one application instance. The user reports that the current deployment has one instance.
+- Allow a planned restart outage of at most 60 seconds when the deployment configures one application instance.
 - Preserve service availability during deployments with multiple configured application instances. Update one instance at a time and verify its readiness before updating the next. An unhealthy instance does not permit the deployment to use the single-instance outage exception.
 - Do not introduce a second deployment command outside managed provider resources.
 
 ## Verified prerequisites and gaps
 
-The inspected Configs revision is `8f70434225fd2e26bf75c519134a7ab4320dcd24`. It defines separate state files for infrastructure, guest configuration, and firmware. Its command wrapper calls these independent configuration roots workspaces.
+The inspected Configs revision is `45c4970edd02e95fb72af5e5ec22712979830efc`. It defines separate state files for infrastructure, guest configuration, and firmware. Its command wrapper calls these independent configuration roots workspaces.
 
 The existing roots have these responsibilities:
 
@@ -39,6 +39,25 @@ The inspected Tack revision `9efb81e0f8e5cf22e8710be773af0344f0901f6d` registers
 The provider also executes guest commands through the Proxmox API. A token that permits that operation does not establish a read-only planning identity. Resolve the actual permissions before enabling live PR plans.
 
 Use a dedicated planning login with a server-enforced fixed Go reader, as approved by the user. Return only approved deployment metadata, including image versions, declared nonsecret container settings, health, and applied migration version. Exclude passwords, application records, arbitrary commands, and file downloads. Enforce the fixed command and disable forwarding and interactive sessions in the server's SSH configuration. Keep the reader and its disclosure policy outside the planning account's write permissions. Supply planning jobs only this login's credential, never the Proxmox execution token or deployment credential. Providers must consume the restricted metadata response rather than a raw Docker API connection during planning. This reader inspects state; OpenTofu resources remain responsible for deployment.
+
+## Establish the installed baseline
+
+Direct SSH inspection on October 23, 2026, verified the application containers below. The commands listed container names and image references without reading environment values, application records, or credential files.
+
+Installed application instances:
+
+| Environment | Guest | Application image source | Audit consumer |
+| --- | --- | --- | --- |
+| QA | CT 217 | `d1ff0e791f626479a3299d3dcf16f9762cd27089` | Runs the matching source version. |
+| QA | CT 223 | `d1ff0e791f626479a3299d3dcf16f9762cd27089` | Does not run on this guest. |
+| Production | CT 117 | `460d25a99f5b4ab03f2e8c0ef44071737cc63f71` | Runs the matching source version. |
+| Production | CT 123 | Docker lists neither running nor stopped containers. | Does not run on this guest. |
+
+Production currently has one application instance. Container presence does not establish application health or load-balancer membership. Adoption must refresh exact digests, identities, mounts, and routing membership before changing ownership.
+
+Neither installed source version supplies the required audited migration-status read. Production implements only migration apply; QA reads status outside audit recording. Do not infer the applied database version from an image tag or invoke apply to inspect it. Task 1 installs the fixed audited reader before schema import.
+
+The GitHub environments `tack-qa-plan`, `tack-qa-apply`, `tack-prod-plan`, and `tack-prod-apply` now exist. Each permits deployments only from `main` and does not require a reviewer or waiting period. The implementation must install its separate restricted credentials and enable the verified workflows.
 
 ## Reuse provider capabilities
 
@@ -86,6 +105,17 @@ Source evidence:
 - A planning identity can execute arbitrary guest commands: withhold live planning until the transport enforces the intended boundary.
 - Recovery lowers the desired schema version: reject the recovery plan.
 - A generic workflow test passes: still require Tack's own installed-image, runtime, and audit evidence.
+
+## Select unattended state credentials
+
+The current application plan uses separate keys in the existing `tofu-state` bucket. Cloudflare's [permanent R2 credentials](https://developers.cloudflare.com/r2/api/tokens/) can restrict access to whole buckets. Exact-object and prefix restrictions require [temporary credentials](https://developers.cloudflare.com/r2/api/s3/temporary-credentials/), which expire and require a parent credential for renewal. Keep that broad parent credential outside GitHub runners.
+
+The remaining choice changes Task 6's storage configuration:
+
+1. Use a separate state bucket for QA and production with a permanent credential restricted to each bucket. Preserve the selected state filenames and encryption. This avoids a credential issuer.
+2. Keep the shared bucket and install a fixed Go credential issuer on an existing protected host. The issuer authenticates each planning or applying identity and returns only its short-lived session. It exits after each request and does not require another daemon or container.
+
+Recommend the separate buckets for the smaller implementation. The current plan does not select either option until the user answers this choice. Do not treat temporary test credentials as an unattended deployment credential system.
 
 ## Implement the approved design
 
