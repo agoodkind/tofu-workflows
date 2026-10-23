@@ -20,7 +20,7 @@ import (
 const sshHostname = "deployment-qa-ssh-proof.goodkind.io"
 const cloudflaredURL = "https://github.com/cloudflare/cloudflared/releases/download/2026.9.1/cloudflared-linux-amd64"
 const cloudflaredDigest = "03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc"
-const trustedHostKey = "tack-qa-proof ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAKGIDBA5fCzrMH4dws9thYA+dX1n0Z1P1yfZJ0P2mX0\n"
+const trustedHostKey = "3d06:bad:b01:210::217 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAKGIDBA5fCzrMH4dws9thYA+dX1n0Z1P1yfZJ0P2mX0\n"
 
 func required(t *testing.T, name string) string {
 	t.Helper()
@@ -148,7 +148,7 @@ func sshProbe(t *testing.T, binary, prefix string) string {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	ssh := exec.CommandContext(ctx, "ssh", "-F", "/dev/null", "-p", port, "-o", "HostKeyAlias=tack-qa-proof", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile="+hosts, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "HostKeyAlgorithms=ssh-ed25519", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=none", "-o", "ConnectTimeout=10", "deployment-readiness-proof@127.0.0.1", "true")
+	ssh := exec.CommandContext(ctx, "ssh", "-F", "/dev/null", "-p", port, "-o", "HostKeyAlias=3d06:bad:b01:210::217", "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile="+hosts, "-o", "GlobalKnownHostsFile=/dev/null", "-o", "HostKeyAlgorithms=ssh-ed25519", "-o", "BatchMode=yes", "-o", "PreferredAuthentications=none", "-o", "ConnectTimeout=10", "deployment-readiness-proof@127.0.0.1", "true")
 	output, err := ssh.CombinedOutput()
 	if err == nil {
 		t.Fatal("The SSH proof unexpectedly authenticated")
