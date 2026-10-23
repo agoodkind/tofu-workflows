@@ -67,6 +67,8 @@ The Docker container reader also omits environment and label refresh. Full drift
 
 Extend `ops deploy verify`, as approved by the user, to accept expected services and image digests from the deployment configuration. Check every declared instance and report missing containers, incorrect images, and failed health checks individually. Support different service placements without requiring both fixed container names on every guest. Keep QA functional tests as a separate required check.
 
+For multiple application instances, stop routing new requests to the selected instance and allow up to 30 seconds for existing requests to finish, as approved by the user. Keep the other instances serving. Replace the selected container only after its existing requests finish. If requests remain at the deadline, cancel that update and restore normal routing without stopping the instance or terminating its requests. Implement this reversible preparation before process shutdown; extending the existing shutdown timeout alone does not satisfy it.
+
 Source evidence:
 
 - [Docker image resource](https://github.com/kreuzwerker/terraform-provider-docker/blob/f5b5f8c4aa7dd333d36f6cc5a4327d316a7d2e73/docs/resources/image.md) and [container resource](https://github.com/kreuzwerker/terraform-provider-docker/blob/f5b5f8c4aa7dd333d36f6cc5a4327d316a7d2e73/docs/resources/container.md) define the existing lifecycle inputs and import behavior.
@@ -108,6 +110,7 @@ This provider implementation is existing unfinished work, not a generic workflow
 - [ ] Implement trusted health and inspection commands that return the shared observation contract from real running services.
 - [ ] Test a normal release, a QA failure, a production health failure, compatible recovery, and interrupted apply on disposable infrastructure.
 - [ ] Verify a single-instance release restores service within 60 seconds after service interruption begins. Verify a multiple-instance release serves requests throughout the update and waits for each updated instance to become ready before updating another. Verify an unhealthy instance prevents an update that would interrupt service.
+- [ ] Verify that an active request finishing within 30 seconds completes before replacement. Verify that a request exceeding that deadline continues without termination, the container remains running, and the canceled update restores routing.
 - [ ] Verify exact installed images and runtime audit records. Only then enable automatic production deployment after the audit work completes.
 
 ## Planning status
