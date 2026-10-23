@@ -59,6 +59,8 @@ The inspected `docker_compose` implementation checks whether project containers 
 
 The current migration reader runs `docker compose run --pull never tack-ops migrate --output json`. It starts a temporary container and reads migrations from the installed image. A new release can contain migrations that image does not include. Extend `tack_schema` to consume candidate migration metadata bound to the release digest, compare it with the live database version during planning, and execute that same candidate during apply. Preserve its expected-version check and verify the resulting version. Do not install the candidate before PR planning merely to discover its migrations.
 
+Publish the candidate migration list during the build, as approved by the user. Include each migration's version, name, and checksum, and bind the list to the exact release image digest and verified build. Planning compares that list with the live applied database version without executing candidate application code with production credentials. Before executing migrations, verify that the candidate image contains the migrations identified by the list. Reject a mismatch before changing the database.
+
 The Docker container reader also omits environment and label refresh. Full drift reporting for those fields requires a general provider correction. Passing passwords through its ordinary `env` configuration would put them in OpenTofu resource state; use protected runtime secret references under the separate credential design.
 
 Source evidence:
