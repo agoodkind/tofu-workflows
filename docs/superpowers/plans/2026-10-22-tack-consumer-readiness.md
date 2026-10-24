@@ -73,7 +73,7 @@ Publish the candidate migration list during the build. Include each migration's 
 
 The Docker container reader also omits environment and label refresh. Full drift reporting for those fields requires a general provider correction. Passing passwords through its ordinary `env` configuration would put them in OpenTofu resource state; use protected runtime secret references under the separate credential design.
 
-Extend `ops deploy verify`, to accept expected services and image digests from the deployment configuration. Check every declared instance and report missing containers, incorrect images, and failed health checks individually. Support different service placements without requiring both fixed container names on every guest. Keep QA functional tests as a separate required check.
+Extend `ops deploy verify` to accept expected services and image digests from the deployment configuration. Check every declared instance and report missing containers, incorrect images, and failed health checks individually. Support different service placements without requiring both fixed container names on every guest. Keep QA functional tests as a separate required check.
 
 For multiple application instances, stop routing new requests to the selected instance and allow up to 30 seconds for existing requests to finish. Keep the other instances serving. Replace the selected container only after its existing requests finish. If requests remain at the deadline, cancel that update and restore normal routing without stopping the instance or terminating its requests. Implement this reversible preparation before process shutdown; extending the existing shutdown timeout alone does not satisfy it.
 
