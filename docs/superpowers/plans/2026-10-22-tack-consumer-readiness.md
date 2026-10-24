@@ -22,9 +22,9 @@
 - Preserve service availability during deployments with multiple configured application instances. Update one instance at a time and verify its readiness before updating the next. An unhealthy instance does not permit the deployment to use the single-instance outage exception.
 - Do not introduce a second deployment command outside managed provider resources.
 
-## Verified prerequisites and gaps
+## Separate application ownership
 
-The inspected Configs revision is `45c4970edd02e95fb72af5e5ec22712979830efc`. It defines separate state files for infrastructure, guest configuration, and firmware. Its command wrapper calls these independent configuration roots workspaces.
+Keep application state separate from the existing infrastructure, guest configuration, and firmware states. The Configs wrapper calls these independent configuration roots workspaces.
 
 The existing roots have these responsibilities:
 
@@ -34,34 +34,21 @@ The existing roots have these responsibilities:
 | Guest configuration | `guest.tfstate` | Includes shared guest preparation and several Tack QA guests. |
 | Firmware | `firmware.tfstate` | Manages hardware firmware configuration. |
 
-The inspected Tack revision `9efb81e0f8e5cf22e8710be773af0344f0901f6d` registers only `tack_schema`. That resource manages migrations. Ansible still installs application images. Neither finding establishes a complete Tack application workspace.
+Require provider resources for application images, migrations, and instance updates before enabling automatic releases.
 
 The provider also executes guest commands through the Proxmox API. A token that permits that operation does not establish a read-only planning identity. Resolve the actual permissions before enabling live PR plans.
 
-Use a dedicated planning login with a server-enforced fixed Go reader, as approved by the user. Return only approved deployment metadata, including image versions, declared nonsecret container settings, health, and applied migration version. Exclude passwords, application records, arbitrary commands, and file downloads. Enforce the fixed command and disable forwarding and interactive sessions in the server's SSH configuration. Keep the reader and its disclosure policy outside the planning account's write permissions. Supply planning jobs only this login's credential, never the Proxmox execution token or deployment credential. Providers must consume the restricted metadata response rather than a raw Docker API connection during planning. This reader inspects state; OpenTofu resources remain responsible for deployment.
+Use a dedicated planning login with a server-enforced fixed Go reader. Return only approved deployment metadata, including image versions, declared nonsecret container settings, health, and applied migration version. Exclude passwords, application records, arbitrary commands, and file downloads. Enforce the fixed command and disable forwarding and interactive sessions in the server's SSH configuration. Keep the reader and its disclosure policy outside the planning account's write permissions. Supply planning jobs only this login's credential, never the Proxmox execution token or deployment credential. Providers must consume the restricted metadata response rather than a raw Docker API connection during planning. This reader inspects state; OpenTofu resources remain responsible for deployment.
 
-## Establish the installed baseline
+## Verify adoption prerequisites
 
-Direct SSH inspection on October 23, 2026, verified the application containers below. The commands listed container names and image references without reading environment values, application records, or credential files.
+Before changing ownership, inspect installed image digests, container identities, mounts, routing membership, and applied schema through the strict audited reader. Require application readiness and audit-consumer checks. Do not infer schema from an image tag or invoke migration apply to inspect it.
 
-Installed application instances:
-
-| Environment | Guest | Application image source | Audit consumer |
-| --- | --- | --- | --- |
-| QA | CT 217 | `d1ff0e791f626479a3299d3dcf16f9762cd27089` | Runs the matching source version. |
-| QA | CT 223 | `d1ff0e791f626479a3299d3dcf16f9762cd27089` | Does not run on this guest. |
-| Production | CT 117 | `460d25a99f5b4ab03f2e8c0ef44071737cc63f71` | Runs the matching source version. |
-| Production | CT 123 | Docker lists neither running nor stopped containers. | Does not run on this guest. |
-
-Production currently has one application instance. Container presence does not establish application health or load-balancer membership. Adoption must refresh exact digests, identities, mounts, and routing membership before changing ownership.
-
-Neither installed source version supplies the required audited migration-status read. Production implements only migration apply; QA reads status outside audit recording. Do not infer the applied database version from an image tag or invoke apply to inspect it. Task 1 installs the fixed audited reader before schema import.
-
-The GitHub environments `tack-qa-plan`, `tack-qa-apply`, `tack-prod-plan`, and `tack-prod-apply` now exist. Each permits deployments only from `main` and does not require a reviewer or waiting period. The implementation must install its separate restricted credentials and enable the verified workflows.
+Configure the GitHub environments `tack-qa-plan`, `tack-qa-apply`, `tack-prod-plan`, and `tack-prod-apply`. Restrict each to `main` without a routine reviewer requirement or waiting period. Install separate restricted credentials before enabling the workflows.
 
 ## Reuse provider capabilities
 
-Source inspection establishes the following application-release mapping. It does not establish installed provider versions or successful deployment through these resources.
+Use these provider responsibilities for application releases:
 
 | Operation | Existing implementation | Required integration or correction |
 | --- | --- | --- |
@@ -72,23 +59,23 @@ Source inspection establishes the following application-release mapping. It does
 | Verify the installed release | `ops deploy verify` compares server and consumer image digests. `/healthz` checks FoundationDB and YugabyteDB. | Accept explicit instance and service targets instead of requiring both fixed container names on every guest. Check required functional behavior and audit consumption separately. |
 | Preserve availability across instances | Docker can wait for one container to become healthy. Tack performs HTTP shutdown with a ten-second deadline. | Coordinate removal from request routing, request completion, replacement, health verification, and return to routing for one instance at a time. Single-container health waiting does not implement this sequence. |
 
-Extend `kreuzwerker/docker`'s `docker_compose` resource for application container state, as approved by the user. Preserve Compose as the single configuration source. Add individual planned service settings, live drift detection, and import that preserves existing containers, networks, and volumes. Do not introduce duplicate Tack image or container resources or separately maintained container declarations. Verify transport and adoption before selecting the provider build for deployment.
+Extend `kreuzwerker/docker`'s `docker_compose` resource for application container state. Preserve Compose as the single configuration source. Add individual planned service settings, live drift detection, and import that preserves existing containers, networks, and volumes. Do not introduce duplicate Tack image or container resources or separately maintained container declarations. Verify transport and adoption before selecting the provider build for deployment.
 
 The existing Docker bridge is not a credential boundary. Its `-get-only` option filters HTTP methods inside the client process, which still reads a Proxmox guest-execution token. It forwards permitted response bodies without field filtering. Restricting methods alone does not restrict access to container inspection data. Its guest requests have a 60-second command timeout and reject events and attached streams; long image pulls need explicit compatibility testing or a bounded transport correction before adoption.
 
-Extend image downloads with a configurable timeout, initially ten minutes, as approved by the user. Finish downloading and verifying all required images before stopping any application instance. A failed download stops the release while the current version continues running. Measure the separate 60-second outage limit from service interruption, excluding prior downloads. Emit a visible GitHub Actions warning when a download takes 30 seconds, including the image and elapsed time. Continue the download until completion or the ten-minute timeout.
+Extend image downloads with a configurable timeout, initially ten minutes. Finish downloading and verifying all required images before stopping any application instance. A failed download stops the release while the current version continues running. Measure the separate 60-second outage limit from service interruption, excluding prior downloads. Emit a visible GitHub Actions warning when a download takes 30 seconds, including the image and elapsed time. Continue the download until completion or the ten-minute timeout.
 
 The inspected `docker_compose` implementation checks whether project containers exist during `Read`, while its planned content changes use a file hash. It does not implement import or compare individual live service fields. The approved extension must correct these gaps through resource state and lifecycle behavior, rather than a command wrapper.
 
 The current migration reader runs `docker compose run --pull never tack-ops migrate --output json`. It starts a temporary container and reads migrations from the installed image. A new release can contain migrations that image does not include. Extend `tack_schema` to consume candidate migration metadata bound to the release digest, compare it with the live database version during planning, and execute that same candidate during apply. Preserve its expected-version check and verify the resulting version. Do not install the candidate before PR planning merely to discover its migrations.
 
-Publish the candidate migration list during the build, as approved by the user. Include each migration's version, name, and checksum, and bind the list to the exact release image digest and verified build. Planning compares that list with the live applied database version without executing candidate application code with production credentials. Before executing migrations, verify that the candidate image contains the migrations identified by the list. Reject a mismatch before changing the database.
+Publish the candidate migration list during the build. Include each migration's version, name, and checksum, and bind the list to the exact release image digest and verified build. Planning compares that list with the live applied database version without executing candidate application code with production credentials. Before executing migrations, verify that the candidate image contains the migrations identified by the list. Reject a mismatch before changing the database.
 
 The Docker container reader also omits environment and label refresh. Full drift reporting for those fields requires a general provider correction. Passing passwords through its ordinary `env` configuration would put them in OpenTofu resource state; use protected runtime secret references under the separate credential design.
 
-Extend `ops deploy verify`, as approved by the user, to accept expected services and image digests from the deployment configuration. Check every declared instance and report missing containers, incorrect images, and failed health checks individually. Support different service placements without requiring both fixed container names on every guest. Keep QA functional tests as a separate required check.
+Extend `ops deploy verify`, to accept expected services and image digests from the deployment configuration. Check every declared instance and report missing containers, incorrect images, and failed health checks individually. Support different service placements without requiring both fixed container names on every guest. Keep QA functional tests as a separate required check.
 
-For multiple application instances, stop routing new requests to the selected instance and allow up to 30 seconds for existing requests to finish, as approved by the user. Keep the other instances serving. Replace the selected container only after its existing requests finish. If requests remain at the deadline, cancel that update and restore normal routing without stopping the instance or terminating its requests. Implement this reversible preparation before process shutdown; extending the existing shutdown timeout alone does not satisfy it.
+For multiple application instances, stop routing new requests to the selected instance and allow up to 30 seconds for existing requests to finish. Keep the other instances serving. Replace the selected container only after its existing requests finish. If requests remain at the deadline, cancel that update and restore normal routing without stopping the instance or terminating its requests. Implement this reversible preparation before process shutdown; extending the existing shutdown timeout alone does not satisfy it.
 
 Source evidence:
 
@@ -108,7 +95,7 @@ Source evidence:
 
 ## Use independent state buckets
 
-Use separate private R2 buckets with [bucket-scoped credentials](https://developers.cloudflare.com/r2/api/tokens/), as selected by the user. Each environment has a read-only planning identity and a separate applying identity. The workflow does not require a credential issuer.
+Use separate private R2 buckets with [bucket-scoped credentials](https://developers.cloudflare.com/r2/api/tokens/). Each environment has a read-only planning identity and a separate applying identity. The workflow does not require a credential issuer.
 
 The selected storage and GitHub environments are:
 
@@ -123,8 +110,6 @@ Run application plans and applies through the shared helper's configsctl executi
 
 Before state adoption, verify the buckets, role permissions, encryption keys, and protected secret delivery. Keep secret values out of operator output.
 
-## Implement the approved design
+## Implement the consumer
 
 Use the [Tack implementation plan](2026-10-22-tack-deployment-implementation.md) for exact interfaces, repository ownership, adoption steps, and acceptance tests. The [disposable test results](2026-10-22-tack-deployment-spikes.md) record the feasibility evidence and its limits.
-
-This document preserves the approved choices and inspected source capabilities. The implementation plan supplies the development tasks; deployment readiness requires those tasks and their acceptance evidence.

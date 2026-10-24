@@ -242,7 +242,7 @@ Use the separate [Tack implementation plan](2026-10-22-tack-deployment-implement
 
 Tack is the first consumer. Its [declarative deployment specification](https://github.com/agoodkind/tack/blob/2b1d90ea65519e978ce8e425f3228c9c0542593d/docs/superpowers/specs/2026-10-10-tack-provider.md) requires existing general providers for supported resources and Tack resources only for application-specific behavior.
 
-The inspected merged implementation registers only the database-migration resource. It does not yet supply complete application deployment through OpenTofu. Complete that existing provider work and its integration plan before enabling automatic Tack applies. This plan implements the generic workflow library; it does not silently expand into a replacement provider or full infrastructure migration.
+Complete the consumer's provider resources and application acceptance before enabling automatic Tack applies. Keep provider implementation separate from the shared workflow library.
 
 - [ ] Complete the provider and consumer tasks in the Tack implementation plan, including the isolated roots, restricted observation, migration manifest, rollout, and acceptance checks.
 - [ ] Replace any proposed SSH-only deployment wrapper with the actual provider authentication and transport. Verify its permissions before enabling live PR planning.

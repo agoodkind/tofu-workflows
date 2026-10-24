@@ -4,7 +4,7 @@ Implement the [queued deployment plan](2026-10-22-queued-deployment.md) against 
 
 ## Pin execution dependencies
 
-Use these inspected versions initially. Update a pin only with the corresponding acceptance results.
+Use these pinned versions. Update a pin only with the corresponding acceptance results.
 
 | Dependency | Revision |
 | --- | --- |
@@ -29,8 +29,6 @@ Require `tofu version -json` to match the pinned version before initialization. 
 Use the public configsctl runner defined below. Require a nonempty existing saved plan and apply that exact file in the same job. Never fall back to an implicit plan inside apply. Reject backends that cannot produce a local saved plan.
 
 Use maintained libraries before adding an implementation. The [Go GitHub SDK](https://github.com/google/go-github/tree/1e7e5ad65e18b07e41636d9559c7d8de29f86576) supplies authentication, API types, services, pagination, and typed rate-limit errors. Keep only authorization, safe diagnostics, and bounded retry policy in the workflow adapter. Reuse standard artifact actions, native Actions concurrency, deployment records, Compose, and the existing provider libraries. Add custom code only for a verified requirement those components do not implement; do not add another queue service, state database, task tracker, scheduler, or plugin framework.
-
-The [upstream comparison run](https://github.com/agoodkind/tofu-workflows/actions/runs/39975479433) passed plan-output, redaction, exact saved-plan, and stale-plan checks. It establishes the compared dflook behavior, not the unimplemented configsctl CI extension. Keep those same public outcomes in the configsctl acceptance below.
 
 ## Define workspace and release inputs
 
@@ -189,7 +187,7 @@ Run a pinned `cloudflared access tcp` subprocess inside the same action containe
 
 Download the pinned client from its [official release asset](https://github.com/cloudflare/cloudflared/releases/download/2026.9.1/cloudflared-linux-amd64) and verify the recorded SHA-256 before including it in the action image. The pinned Linux image uses this architecture; another architecture requires its own verified asset.
 
-Preserve endpoint identity independently from the socket address. HTTPS clients retain the original URL hostname and verify its certificate while dialing the local listener. SSH clients verify the original target's pinned host key while dialing the local listener. Never disable verification or select a different User-Agent to evade an HTTP challenge. The disposable test found a browser challenge on the published HTTP route; TCP forwarding permits the normal Go client and end-to-end origin TLS.
+Preserve endpoint identity independently from the socket address. HTTPS clients retain the original URL hostname and verify its certificate while dialing the local listener. SSH clients verify the original target's pinned host key while dialing the local listener. Never disable verification or select a different User-Agent to evade an HTTP challenge.
 
 Define `access.Start(ctx context.Context, tunnels []config.AccessTunnel) (*Session, error)` and `(*Session).Close() error` in `internal/access`. Validate hostname, unique port, and allowed credential-variable references before starting any process. Return an error if a listener exits during the operation. Keep protected provider connection settings consistent with these fixed ports; release input cannot change them.
 
@@ -201,7 +199,7 @@ An OpenTofu backend lock excludes other users of that state. It does not exclude
 
 Install an administrator-owned fixed Go command in configsctl, `host-lock serve --principal ID`. SSH configuration supplies the principal and fixed command, disables shell/file transfer/forwarding, and permits only the protected host. Accept one JSON request of at most 4 KiB with `protocol_version`, `operation`, `run_id`, and `lease_seconds`. Accept `acquire`, `renew`, `release`, and `extend`; reject duplicate or unknown fields and caller-selected paths. Permit acquire/renew leases from one through 4200 seconds and extend requests from one through 900 seconds. Prefix stored run identities with the server's principal. The caller cannot renew or release another principal's lock.
 
-Reuse the [existing configsctl lock protocol](https://github.com/agoodkind/configsctl/blob/26c05c9064ae273657d9d3a666d28f75a6f31711/internal/hostlock/lock.sh): the fixed lock file, boot-specific atomic directory guard, three-field record, expiry rules, and matching-owner release. Reject symlink paths, malformed records, and nonempty stale guards without deleting their contents. Return bounded status codes plus the host time and expiry. Local disposable interoperability tests established that the unchanged client and a fixed Go helper exclude each other.
+Reuse the [existing configsctl lock protocol](https://github.com/agoodkind/configsctl/blob/26c05c9064ae273657d9d3a666d28f75a6f31711/internal/hostlock/lock.sh): the fixed lock file, boot-specific atomic directory guard, three-field record, expiry rules, and matching-owner release. Reject symlink paths, malformed records, and nonempty stale guards without deleting their contents. Return bounded status codes plus the host time and expiry.
 
 Expose the existing configsctl `hostlock` package for external consumers and extend its existing `Set`, `AcquireAll`, `RenewAll`, `KeepRenewed`, and release implementation. Do not build a second `LeaseSet`. Add `OperationTransport.Do(ctx context.Context, host Host, request Request) (Response, error)`, with the existing typed operation/run/controller/lease fields and expiry/host-time reply. Add `AcquireAllWithOptions(ctx context.Context, hosts []Host, run, controller string, lease Lease, options Options) (*Set, error)`, where `Options` selects the transport, strict renewal failure, and per-request timeout. Preserve the old default API for existing callers. Add a checked release result for callers that must verify completion. Keep fixed-path filesystem operations and restricted SSH inside configsctl, not the shared workflow. Reuse its partial acquisition cleanup and renewal machinery, and publish/pin this extension before linking it into the workflow.
 
