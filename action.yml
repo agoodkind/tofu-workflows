@@ -1,0 +1,37 @@
+name: Validate deployment inputs
+description: Validate a deployment set and an optional release manifest or ZIP artifact.
+inputs:
+  checkout:
+    description: Select the checkout directory that contains every input file.
+    required: false
+    default: .
+  config:
+    description: Select the deployment set JSON file relative to the checkout.
+    required: true
+  manifest:
+    description: Select a release JSON file relative to the checkout.
+    required: false
+    default: ''
+  artifact:
+    description: Select a release ZIP file instead of manifest.
+    required: false
+    default: ''
+  expected-run-id:
+    description: Set the build run ID for release validation.
+    required: false
+    default: '0'
+  expected-attempt:
+    description: Set the build run attempt for release validation.
+    required: false
+    default: '0'
+runs:
+  using: docker
+  image: Dockerfile
+  args:
+    - validate
+    - --checkout=${{ inputs.checkout }}
+    - --config=${{ inputs.config }}
+    - --manifest=${{ inputs.manifest }}
+    - --artifact=${{ inputs.artifact }}
+    - --expected-run-id=${{ inputs.expected-run-id }}
+    - --expected-attempt=${{ inputs.expected-attempt }}

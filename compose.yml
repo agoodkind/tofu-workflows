@@ -1,0 +1,12 @@
+services:
+  action:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    working_dir: /github/workspace
+    volumes:
+      - runner-temp:/github/runner_temp
+
+volumes:
+  runner-temp:
