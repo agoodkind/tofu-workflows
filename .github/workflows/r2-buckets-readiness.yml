@@ -5,6 +5,9 @@ on:
     paths:
       - .github/workflows/r2-buckets-readiness.yml
       - proof/r2-buckets/**
+concurrency:
+  group: tofu-workflows-r2-buckets-readiness-proof
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:

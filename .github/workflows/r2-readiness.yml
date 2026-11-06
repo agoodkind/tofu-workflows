@@ -5,6 +5,9 @@ on:
     paths:
       - .github/workflows/r2-readiness.yml
       - proof/r2/**
+concurrency:
+  group: tofu-workflows-r2-readiness-proof
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
