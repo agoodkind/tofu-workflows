@@ -1,0 +1,2 @@
+# golangci-lint: generated_at=2026-11-06T04:11:45Z
+proof/network/main.go:1:1: package-comments: should have a package comment (revive)	# golangci-lint:first_added=2026-11-06T04:11:45Z last_seen=2026-11-06T04:11:45Z

@@ -1,0 +1,27 @@
+name: Disposable Cloudflare connectivity proof
+on:
+  push:
+    branches: [codex/upstream-contract-proof]
+    paths:
+      - .github/workflows/cloudflare-readiness.yml
+      - proof/cloudflare/**
+permissions:
+  contents: read
+jobs:
+  connectivity:
+    runs-on: ubuntu-24.04
+    environment: deployment-readiness-proof
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify scoped HTTPS and SSH connections
+        run: go test -v ./proof/cloudflare -count=1 -timeout=6m
+        env:
+          CF_PROOF_CLIENT_ID: ${{ secrets.CF_PROOF_CLIENT_ID }}
+          CF_PROOF_CLIENT_SECRET: ${{ secrets.CF_PROOF_CLIENT_SECRET }}
+          CF_PROOF_WRONG_CLIENT_ID: ${{ secrets.CF_PROOF_WRONG_CLIENT_ID }}
+          CF_PROOF_WRONG_CLIENT_SECRET: ${{ secrets.CF_PROOF_WRONG_CLIENT_SECRET }}

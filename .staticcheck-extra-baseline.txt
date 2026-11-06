@@ -1,0 +1,5 @@
+# staticcheck-extra: generated_at=2026-11-06T04:11:46Z
+proof/contracts_test.go:1:9: This test file declares package proof, the package under test. A test must enter through the exported API. Change the package clause to proof_test and call only exported identifiers.	# staticcheck-extra:first_added=2026-11-06T04:11:46Z last_seen=2026-11-06T04:11:46Z
+proof/network/main.go:23:1: boundary function must emit at least one structured slog event	# staticcheck-extra:first_added=2026-11-06T04:11:46Z last_seen=2026-11-06T04:11:46Z
+proof/r2-buckets/main_test.go:1:9: This test file declares package r2buckets, the package under test. A test must enter through the exported API. Change the package clause to r2buckets_test and call only exported identifiers.	# staticcheck-extra:first_added=2026-11-06T04:11:46Z last_seen=2026-11-06T04:11:46Z
+proof/r2/main_test.go:1:9: This test file declares package r2proof, the package under test. A test must enter through the exported API. Change the package clause to r2proof_test and call only exported identifiers.	# staticcheck-extra:first_added=2026-11-06T04:11:46Z last_seen=2026-11-06T04:11:46Z
