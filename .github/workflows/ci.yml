@@ -33,6 +33,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - run: make test GO_TEST_TARGETS='-tags=packaging -run TestActionContainer -count=1 -timeout=25m ./cmd/tofu-workflows'
+      - run: make test GO_TEST_TARGETS='-tags=packaging -v -run TestActionContainer -count=1 -timeout=25m ./cmd/tofu-workflows'
       - if: always()
         run: docker compose --file compose.yml down --volumes --remove-orphans --rmi local
