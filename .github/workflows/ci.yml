@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    uses: agoodkind/go-makefile/.github/workflows/_ci.yml@bc41cecbc2b2d643d24e426a1ca104a4a4e3350a
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write

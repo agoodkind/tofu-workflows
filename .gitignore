@@ -1,0 +1,7 @@
+/.make/
+/dist/
+/go.work
+/go.work.sum
+!/.go-mk-applied-notices
+!/.golangci-lint-baseline.txt
+!/.staticcheck-extra-baseline.txt
