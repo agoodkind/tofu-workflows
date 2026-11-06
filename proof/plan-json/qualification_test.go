@@ -354,7 +354,15 @@ func TestRealOpenTofuPlansPreserveActionsMasksAndUnknowns(t *testing.T) {
 			t.Fatalf("Applied resource %s still changes", resource.Address)
 		}
 	}
-	t.Log("Real create, update, delete, both replacement orders, sensitive object and list values, sensitive output, unknown values, numeric precision, exact protected addresses, and final no-op checks passed.")
+	t.Log("\n" +
+		"1. terraform-json preserved create, update, and delete actions.\n" +
+		"2. terraform-json preserved both replacement orders and replacement paths.\n" +
+		"3. terraform-json preserved sensitivity masks for nested objects, lists, and outputs.\n" +
+		"4. Redaction removed the synthetic sensitive text from the projection.\n" +
+		"5. The projection preserved public values and unknown markers.\n" +
+		"6. terraform-json preserved the numeric input 2 as json.Number.\n" +
+		"7. The check identified terraform_data.protected as the only changed protected resource.\n" +
+		"8. The final plan reported every resource as unchanged.")
 }
 
 func TestGitHubSDKReadsCurrentRunAndRepository(t *testing.T) {
