@@ -31,7 +31,8 @@ const (
 )
 
 type composeProject struct {
-	name string
+	name  string
+	image string
 }
 
 type containerCall struct {
@@ -53,6 +54,11 @@ func newComposeProject(t *testing.T) composeProject {
 		t.Fatalf("Set %s to a unique Compose project name before running the packaging test.", composeProjectEnv)
 	}
 	project := composeProject{name: name}
+	output, err := project.command(t.Context(), "config", "--images", composeService).CombinedOutput()
+	if err != nil {
+		t.Fatalf("Image listing failed: %s; %v", output, err)
+	}
+	project.image = strings.TrimSpace(string(output))
 	if leftover := project.ownedResources(t.Context()); leftover != "" {
 		t.Fatalf("Compose project %s already owns Docker resources: %s", name, leftover)
 	}
@@ -81,8 +87,13 @@ func (project composeProject) labelFilter() string {
 
 func (project composeProject) ownedResources(ctx context.Context) string {
 	var leftover []string
-	for _, kind := range [][]string{{"container", "ls", "--all"}, {"network", "ls"}, {"volume", "ls"}, {"image", "ls"}} {
-		args := append(append([]string{}, kind...), "--quiet", "--filter", project.labelFilter())
+	for _, kind := range [][]string{
+		{"container", "ls", "--all", "--filter", project.labelFilter()},
+		{"network", "ls", "--filter", project.labelFilter()},
+		{"volume", "ls", "--filter", project.labelFilter()},
+		{"image", "ls", "--filter", "reference=" + project.image},
+	} {
+		args := append(append([]string{}, kind...), "--quiet")
 		output, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 		if err != nil {
 			leftover = append(leftover, kind[0]+" listing failed: "+strings.TrimSpace(string(output))+"; "+err.Error())
@@ -101,11 +112,11 @@ func (project composeProject) build(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compose build failed: %s; %v", output, err)
 	}
-	output, err = exec.CommandContext(t.Context(), "docker", "image", "ls", "--no-trunc", "--format", "{{.Repository}} {{.ID}}", "--filter", project.labelFilter()).CombinedOutput()
+	output, err = exec.CommandContext(t.Context(), "docker", "image", "inspect", "--format", "{{.Id}}", project.image).CombinedOutput()
 	if err != nil {
 		t.Fatalf("Image listing failed: %s; %v", output, err)
 	}
-	t.Logf("Built image: %s", strings.TrimSpace(string(output)))
+	t.Logf("Built image: %s %s", project.image, strings.TrimSpace(string(output)))
 }
 
 func (project composeProject) run(t *testing.T, call containerCall, args ...string) containerResult {
