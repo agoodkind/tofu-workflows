@@ -19,8 +19,10 @@ import (
 	"time"
 )
 
-const bucket = "deployment-readiness-proof-20261023"
-const endpoint = "https://ee7d7ca7d611ef8c2a07885e8362de0c.r2.cloudflarestorage.com"
+const (
+	bucket   = "deployment-readiness-proof-20261023"
+	endpoint = "https://ee7d7ca7d611ef8c2a07885e8362de0c.r2.cloudflarestorage.com"
+)
 
 type storage struct{ endpoint, access, secret, token string }
 
@@ -92,14 +94,14 @@ func tofu(dir string, environment []string, args ...string) ([]byte, error) {
 func root(t *testing.T, base, name, endpoint string) string {
 	t.Helper()
 	dir := filepath.Join(base, name)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	source, err := os.ReadFile("main.tf")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "main.tf"), source, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), source, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	tmpl, err := template.ParseFiles("backend.hcl.tmpl")
@@ -111,7 +113,7 @@ func root(t *testing.T, base, name, endpoint string) string {
 	if err := tmpl.Execute(&backend, inputs); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "backend.hcl"), backend.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "backend.hcl"), backend.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir

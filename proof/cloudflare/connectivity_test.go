@@ -17,10 +17,12 @@ import (
 	"time"
 )
 
-const sshHostname = "deployment-qa-ssh-proof.goodkind.io"
-const cloudflaredURL = "https://github.com/cloudflare/cloudflared/releases/download/2026.9.1/cloudflared-linux-amd64"
-const cloudflaredDigest = "03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc"
-const trustedHostKey = "3d06:bad:b01:210::217 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAKGIDBA5fCzrMH4dws9thYA+dX1n0Z1P1yfZJ0P2mX0\n"
+const (
+	sshHostname       = "deployment-qa-ssh-proof.goodkind.io"
+	cloudflaredURL    = "https://github.com/cloudflare/cloudflared/releases/download/2026.9.1/cloudflared-linux-amd64"
+	cloudflaredDigest = "03f1f25d1cc93b9ad6c60569d44060bc4f17ed97075760ed8cfca4b12dcd68cc"
+	trustedHostKey    = "3d06:bad:b01:210::217 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAKGIDBA5fCzrMH4dws9thYA+dX1n0Z1P1yfZJ0P2mX0\n"
+)
 
 func required(t *testing.T, name string) string {
 	t.Helper()
@@ -30,6 +32,7 @@ func required(t *testing.T, name string) string {
 	}
 	return value
 }
+
 func TestTLSOriginRequiresExactServiceIdentity(t *testing.T) {
 	binary := cloudflared(t)
 	for _, test := range []struct {
@@ -95,7 +98,7 @@ func cloudflared(t *testing.T) string {
 		t.Fatal("cloudflared checksum differs from the pinned release")
 	}
 	path := filepath.Join(t.TempDir(), "cloudflared")
-	if err := os.WriteFile(path, body, 0700); err != nil {
+	if err := os.WriteFile(path, body, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -143,7 +146,7 @@ func sshProbe(t *testing.T, binary, prefix string) string {
 	address := tunnel(t, binary, sshHostname, prefix)
 	_, port, _ := net.SplitHostPort(address)
 	hosts := filepath.Join(t.TempDir(), "known_hosts")
-	if err := os.WriteFile(hosts, []byte(trustedHostKey), 0600); err != nil {
+	if err := os.WriteFile(hosts, []byte(trustedHostKey), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)

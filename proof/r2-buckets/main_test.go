@@ -19,9 +19,11 @@ import (
 	"time"
 )
 
-const qaBucket = "deployment-readiness-qa-20261023"
-const prodBucket = "deployment-readiness-prod-20261023"
-const endpoint = "https://ee7d7ca7d611ef8c2a07885e8362de0c.r2.cloudflarestorage.com"
+const (
+	qaBucket   = "deployment-readiness-qa-20261023"
+	prodBucket = "deployment-readiness-prod-20261023"
+	endpoint   = "https://ee7d7ca7d611ef8c2a07885e8362de0c.r2.cloudflarestorage.com"
+)
 
 type storage struct{ endpoint, access, secret, bucket string }
 
@@ -99,14 +101,14 @@ func tofu(dir string, environment []string, args ...string) ([]byte, error) {
 func root(t *testing.T, base, name, key, bucket, endpoint string) string {
 	t.Helper()
 	dir := filepath.Join(base, name)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	source, err := os.ReadFile("main.tf")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "main.tf"), source, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), source, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	tmpl, err := template.ParseFiles("backend.hcl.tmpl")
@@ -118,7 +120,7 @@ func root(t *testing.T, base, name, key, bucket, endpoint string) string {
 	if err := tmpl.Execute(&backend, inputs); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "backend.hcl"), backend.Bytes(), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "backend.hcl"), backend.Bytes(), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -133,9 +135,11 @@ func client(t *testing.T, label, bucket string) storage {
 	}
 	return storage{endpoint, access, secret, bucket}
 }
+
 func childEnvironment(base []string, s storage, key, payload string) []string {
 	return append(append([]string{}, base...), assignment("AWS_ACCESS_KEY_ID", s.access), assignment("AWS_SECRET_ACCESS_KEY", s.secret), "AWS_EC2_METADATA_DISABLED=true", assignment("TF_VAR_vault_tofu_state_passphrase", key), assignment("TF_VAR_payload", payload))
 }
+
 func requireStatus(t *testing.T, s storage, method, path string, body []byte, expected int) []byte {
 	t.Helper()
 	status, data, err := s.request(method, path, body)
@@ -144,6 +148,7 @@ func requireStatus(t *testing.T, s storage, method, path string, body []byte, ex
 	}
 	return data
 }
+
 func TestDirectBucketCredentials(t *testing.T) {
 	qa := client(t, "QA", qaBucket)
 	prod := client(t, "PROD", prodBucket)

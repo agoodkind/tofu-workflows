@@ -114,6 +114,7 @@ func child(value any, key string) any {
 	}
 	return object[key]
 }
+
 func element(value any, index int) any {
 	array, ok := value.([]any)
 	if !ok || index >= len(array) {
@@ -121,6 +122,7 @@ func element(value any, index int) any {
 	}
 	return array[index]
 }
+
 func redact(value, sensitive, unknown any) any {
 	if marked, ok := sensitive.(bool); ok && marked {
 		return "<sensitive>"
@@ -269,7 +271,7 @@ func TestRealOpenTofuPlansPreserveActionsMasksAndUnknowns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = os.WriteFile(filepath.Join(directory, "main.tf"), source, 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(directory, "main.tf"), source, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	random := make([]byte, 24)
