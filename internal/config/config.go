@@ -258,7 +258,7 @@ func validateReferences(environment Environment) error {
 func validateSecrets(environment Environment) error {
 	names := make(map[string]bool)
 	for _, name := range append(slices.Clone(environment.BackendSecretEnvNames), environment.SecretEnvNames...) {
-		if !variablePattern.MatchString(name) || forbiddenEnvironment(name) {
+		if !SecretEnvironmentName(name) {
 			return fmt.Errorf("secret environment name %q is not allowed", name)
 		}
 		if names[name] {
@@ -274,16 +274,20 @@ func validateSecrets(environment Environment) error {
 	return nil
 }
 
-func forbiddenEnvironment(name string) bool {
+// SecretEnvironmentName rejects reserved names and invalid variable syntax.
+func SecretEnvironmentName(name string) bool {
+	if !variablePattern.MatchString(name) {
+		return false
+	}
 	if slices.Contains([]string{"PATH", "HOME", "TMPDIR", "TERRAFORM_PRE_RUN"}, name) {
-		return true
+		return false
 	}
 	for _, prefix := range []string{"GITHUB_", "ACTIONS_", "INPUT_", "TF_CLI_ARGS", "TF_LOG"} {
 		if strings.HasPrefix(name, prefix) {
-			return true
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func validateCheck(check Check, environment Environment) error {

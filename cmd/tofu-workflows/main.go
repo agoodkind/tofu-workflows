@@ -20,6 +20,13 @@ import (
 	"github.com/agoodkind/tofu-workflows/internal/release"
 )
 
+type commandName string
+
+const (
+	validateCommand    commandName = "validate"
+	credentialsCommand commandName = "credentials"
+)
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
@@ -36,15 +43,23 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return 1
 	}
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "A command is required. Use validate.")
+		fmt.Fprintln(stderr, "A command is required. Use validate or credentials.")
 		return 2
 	}
-	if args[0] != "validate" {
-		fmt.Fprintf(stderr, "Unsupported command %q. Use validate.\n", args[0])
+	var err error
+	failure := "Validation"
+	switch commandName(args[0]) {
+	case validateCommand:
+		err = validate(args[1:], stdout, stderr)
+	case credentialsCommand:
+		failure = "Credentials"
+		err = credentialCommand(args[1:], stderr)
+	default:
+		fmt.Fprintf(stderr, "Unsupported command %q. Use validate or credentials.\n", args[0])
 		return 2
 	}
-	if err := validate(args[1:], stdout, stderr); err != nil {
-		fmt.Fprintf(stderr, "Validation failed: %v\n", err)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s failed: %v\n", failure, err)
 		return 1
 	}
 	return 0
