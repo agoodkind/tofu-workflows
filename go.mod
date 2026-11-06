@@ -8,6 +8,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/hashicorp/terraform-json v0.29.0
 	github.com/zclconf/go-cty v1.19.0
+	sigs.k8s.io/json v0.0.0-20260909141634-11ed52e25bc5
 )
 
 require (

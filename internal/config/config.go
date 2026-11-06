@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/agoodkind/tofu-workflows/internal/input"
+	strictjson "sigs.k8s.io/json"
 )
 
 // TofuVersion pins the supported OpenTofu runtime.
@@ -120,11 +121,8 @@ func Load(path string) (DeploymentSet, error) {
 		slog.Error("Deployment configuration read failed", "err", err)
 		return set, fmt.Errorf("read deployment set: %w", err)
 	}
-	decoder, err := input.ReadJSON(data)
-	if err != nil {
-		return set, fmt.Errorf("read deployment JSON: %w", err)
-	}
-	if err := decoder.Decode(&set); err != nil {
+	strictErrors, decodeErr := strictjson.UnmarshalStrict(data, &set)
+	if err := errors.Join(append(strictErrors, decodeErr)...); err != nil {
 		return set, fmt.Errorf("decode deployment set: %w", err)
 	}
 	if err := validate(set); err != nil {

@@ -234,13 +234,13 @@ func TestRejectUnsafeManifestArchive(t *testing.T) {
 			return bytes.Replace(data, []byte(`"build_attempt":2`), []byte(`"build_attempt":3`), 1)
 		}, diagnostic: "expected build run"},
 		{name: "oversized entry", names: []string{"release.json"}, change: func(data []byte) []byte { return append(data, bytes.Repeat([]byte(" "), 65536)...) }, diagnostic: "64 KiB"},
-		{name: "trailing document", names: []string{"release.json"}, change: func(data []byte) []byte { return append(data, []byte(" {}")...) }, diagnostic: "exactly one document"},
+		{name: "trailing document", names: []string{"release.json"}, change: func(data []byte) []byte { return append(data, []byte(" {}")...) }, diagnostic: "after top-level value"},
 		{name: "unexpected manifest key", names: []string{"release.json"}, change: func(data []byte) []byte {
 			return bytes.Replace(data, []byte(`"version":1`), []byte(`"version":1,"configuration_revision":"main"`), 1)
 		}, diagnostic: "unknown field"},
 		{name: "duplicate JSON key", names: []string{"release.json"}, change: func(data []byte) []byte {
 			return bytes.Replace(data, []byte(`"version":1`), []byte(`"version":2,"version":1`), 1)
-		}, diagnostic: "duplicate JSON member"},
+		}, diagnostic: "duplicate field"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newFixture(t)
@@ -282,5 +282,76 @@ func TestRejectUnsafeManifestArchive(t *testing.T) {
 				t.Fatal("Validation overwrote a file outside the checkout.")
 			}
 		})
+	}
+}
+
+func TestRejectCaseVariantJSONFields(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		config      bool
+		original    string
+		replacement string
+	}{
+		{name: "configuration alias", config: true, original: `"producer_workflow_id":17`, replacement: `"PRODUCER_WORKFLOW_ID":17`},
+		{name: "configuration conflict", config: true, original: `"producer_workflow_id":17`, replacement: `"producer_workflow_id":18,"PRODUCER_WORKFLOW_ID":17`},
+		{name: "nested configuration alias", config: true, original: `"root":"qa"`, replacement: `"ROOT":"qa"`},
+		{name: "nested configuration conflict", config: true, original: `"root":"qa"`, replacement: `"root":"missing","ROOT":"qa"`},
+		{name: "variable rule alias", config: true, original: `"kind":"bool"`, replacement: `"KIND":"bool"`},
+		{name: "variable rule conflict", config: true, original: `"kind":"bool"`, replacement: `"kind":"string","KIND":"bool"`},
+		{name: "manifest alias", original: `"build_run_id":29`, replacement: `"BUILD_RUN_ID":29`},
+		{name: "manifest conflict", original: `"build_run_id":29`, replacement: `"build_run_id":30,"BUILD_RUN_ID":29`},
+	} {
+		for _, archive := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/archive=%t", test.name, archive), func(t *testing.T) {
+				f := newFixture(t)
+				configuration, err := json.Marshal(f.set)
+				if err != nil {
+					t.Fatal(err)
+				}
+				manifest, err := json.Marshal(f.manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if test.config {
+					configuration = bytes.Replace(configuration, []byte(test.original), []byte(test.replacement), 1)
+				} else {
+					manifest = bytes.Replace(manifest, []byte(test.original), []byte(test.replacement), 1)
+				}
+				write(t, f.directory, "deployment.json", configuration)
+				arguments := []string{"validate", "--checkout", f.directory, "--config", "deployment.json", "--expected-run-id", "29", "--expected-attempt", "2"}
+				if archive {
+					write(t, f.directory, "release.zip", archiveBytes(t, []string{"release.json"}, 0, manifest))
+					arguments = append(arguments, "--artifact", "release.zip")
+				} else {
+					write(t, f.directory, "release.json", manifest)
+					arguments = append(arguments, "--manifest", "release.json")
+				}
+				output, err := invoke(t, f.directory, arguments...)
+				assertResult(t, output, err, "unknown field")
+			})
+		}
+	}
+}
+
+func TestValidateCaseSensitiveMaps(t *testing.T) {
+	f := newFixture(t)
+	f.set.Variables["CHANNEL"] = config.VariableRule{Kind: "string", AllowedValues: []string{"preview"}}
+	f.set.Variables["large_number"] = config.VariableRule{Kind: "number"}
+	f.manifest.Variables["CHANNEL"] = json.RawMessage(`"preview"`)
+	f.manifest.Variables["large_number"] = json.RawMessage(`1e10000`)
+	f.set.ArtifactRepositories["Application"] = "ghcr.io/example/other"
+	f.manifest.Artifacts["Application"] = strings.Replace(image, "/application@", "/other@", 1)
+	writeJSON(t, f.directory, "deployment.json", f.set)
+	writeJSON(t, f.directory, "release.json", f.manifest)
+	output, err := invoke(t, f.directory, "validate", "--checkout", f.directory, "--config", "deployment.json", "--manifest", "release.json", "--expected-run-id", "29", "--expected-attempt", "2")
+	assertResult(t, output, err, "")
+	loaded, err := release.Load(filepath.Join(f.directory, "release.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"generation", "large_number", "channel", "CHANNEL"} {
+		if !bytes.Equal(loaded.Variables[name], f.manifest.Variables[name]) {
+			t.Fatalf("Manifest variable %q changed during decoding.", name)
+		}
 	}
 }

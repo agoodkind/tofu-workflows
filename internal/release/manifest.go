@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"github.com/agoodkind/tofu-workflows/internal/input"
+	strictjson "sigs.k8s.io/json"
 )
 
 const (
@@ -92,11 +93,8 @@ func readManifest(reader io.Reader) (Manifest, error) {
 	if len(data) > maxManifestBytes {
 		return manifest, errors.New("release.json exceeds 64 KiB")
 	}
-	decoder, err := input.ReadJSON(data)
-	if err != nil {
-		return manifest, fmt.Errorf("read release JSON: %w", err)
-	}
-	if err := decoder.Decode(&manifest); err != nil {
+	strictErrors, decodeErr := strictjson.UnmarshalStrict(data, &manifest)
+	if err := errors.Join(append(strictErrors, decodeErr)...); err != nil {
 		return manifest, fmt.Errorf("decode release manifest: %w", err)
 	}
 	if err := validate(manifest); err != nil {
