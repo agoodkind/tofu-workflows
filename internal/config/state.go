@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/netip"
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/agoodkind/tofu-workflows/internal/input"
@@ -16,6 +18,8 @@ import (
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/zclconf/go-cty/cty"
 )
+
+var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 
 // ValidateStateOwnership compares physical S3 objects independently of state labels.
 // Remote workspace existence requires authenticated backend initialization before execution.
@@ -239,8 +243,8 @@ func s3Identity(attributes hcl.Attributes, workspace string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if bucket == "" || bucket != strings.ToLower(bucket) || strings.ContainsAny(bucket, "/\\ \n\r\t") {
-		return "", errors.New("s3 bucket must be a lowercase bucket name")
+	if err := validateBucketName(bucket); err != nil {
+		return "", err
 	}
 	key, err := attributeString(attributes, "key")
 	if err != nil {
@@ -266,4 +270,17 @@ func s3Identity(attributes hcl.Attributes, workspace string) (string, error) {
 	// can select the same object despite different workspace names.
 	identity := strings.Join([]string{endpoint, bucket, key}, "\x00")
 	return fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(identity))), nil
+}
+
+func validateBucketName(bucket string) error {
+	if !bucketNamePattern.MatchString(bucket) {
+		return errors.New("s3 bucket must contain 3 to 63 lowercase letters, digits, periods, or hyphens and begin and end with a letter or digit")
+	}
+	if strings.Contains(bucket, "..") {
+		return errors.New("s3 bucket must not contain adjacent periods")
+	}
+	if _, err := netip.ParseAddr(bucket); err == nil {
+		return errors.New("s3 bucket must not be an IP address")
+	}
+	return nil
 }

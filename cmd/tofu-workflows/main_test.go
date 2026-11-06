@@ -111,6 +111,9 @@ func TestValidateConsumerInputs(t *testing.T) {
 		{name: "digest", change: func(_ *testing.T, f *fixture) {
 			f.manifest.Artifacts["application"] = "ghcr.io/example/application:latest"
 		}, diagnostic: "sha256 digest"},
+		{name: "malformed digest after allowed repository", change: func(_ *testing.T, f *fixture) {
+			f.manifest.Artifacts["application"] = "ghcr.io/example/application@sha256:bad"
+		}, diagnostic: "sha256 digest"},
 		{name: "parallelism", change: func(_ *testing.T, f *fixture) { f.set.Validation.Parallelism = 0 }, diagnostic: "parallelism"},
 		{name: "timeout", change: func(_ *testing.T, f *fixture) { f.set.Validation.JobTimeoutMinutes = 181 }, diagnostic: "job_timeout_minutes"},
 		{name: "undeclared variable", change: func(_ *testing.T, f *fixture) { f.manifest.Variables["root"] = json.RawMessage(`"other"`) }, diagnostic: "not declared"},
@@ -124,6 +127,10 @@ func TestValidateConsumerInputs(t *testing.T) {
 		}, diagnostic: "protected repository"},
 		{name: "duplicate states with different labels", change: func(t *testing.T, f *fixture) {
 			write(t, f.directory, "production/backend.hcl", []byte("endpoint = \"https://STATE.example.test:443/\"\nbucket = \"application-state\"\nkey = \"qa.tfstate\"\n"))
+		}, diagnostic: "duplicate physical state identity"},
+		{name: "duplicate endpoint with uppercase scheme", change: func(t *testing.T, f *fixture) {
+			write(t, f.directory, "qa/backend.hcl", []byte("endpoint = \"http://state.example.test\"\nbucket = \"application-state\"\nkey = \"qa.tfstate\"\n"))
+			write(t, f.directory, "production/backend.hcl", []byte("endpoint = \"HTTP://STATE.example.test:80/\"\nbucket = \"application-state\"\nkey = \"qa.tfstate\"\n"))
 		}, diagnostic: "duplicate physical state identity"},
 		{name: "named workspace collides with default", change: func(t *testing.T, f *fixture) {
 			f.set.Validation.CLIWorkspace = "qa"
@@ -233,6 +240,9 @@ func TestRejectUnsafeManifestArchive(t *testing.T) {
 		{name: "forged attempt", names: []string{"release.json"}, change: func(data []byte) []byte {
 			return bytes.Replace(data, []byte(`"build_attempt":2`), []byte(`"build_attempt":3`), 1)
 		}, diagnostic: "expected build run"},
+		{name: "malformed digest after allowed repository", names: []string{"release.json"}, change: func(data []byte) []byte {
+			return bytes.Replace(data, []byte(image), []byte("ghcr.io/example/application@sha256:bad"), 1)
+		}, diagnostic: "sha256 digest"},
 		{name: "oversized entry", names: []string{"release.json"}, change: func(data []byte) []byte { return append(data, bytes.Repeat([]byte(" "), 65536)...) }, diagnostic: "64 KiB"},
 		{name: "trailing document", names: []string{"release.json"}, change: func(data []byte) []byte { return append(data, []byte(" {}")...) }, diagnostic: "after top-level value"},
 		{name: "unexpected manifest key", names: []string{"release.json"}, change: func(data []byte) []byte {
@@ -353,5 +363,34 @@ func TestValidateCaseSensitiveMaps(t *testing.T) {
 		if !bytes.Equal(loaded.Variables[name], f.manifest.Variables[name]) {
 			t.Fatalf("Manifest variable %q changed during decoding.", name)
 		}
+	}
+}
+
+func TestValidateS3BucketNames(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		bucket     string
+		diagnostic string
+	}{
+		{name: "minimum length", bucket: "a12"},
+		{name: "maximum length", bucket: strings.Repeat("a", 63)},
+		{name: "hyphen", bucket: "application-state"},
+		{name: "single periods", bucket: "application.state"},
+		{name: "AWS reserved prefix remains endpoint policy", bucket: "sthree-application"},
+		{name: "adjacent periods", bucket: "bad..name", diagnostic: "s3 bucket"},
+		{name: "too long", bucket: strings.Repeat("a", 64), diagnostic: "s3 bucket"},
+		{name: "too short", bucket: "ab", diagnostic: "s3 bucket"},
+		{name: "underscore", bucket: "application_state", diagnostic: "s3 bucket"},
+		{name: "leading hyphen", bucket: "-application", diagnostic: "s3 bucket"},
+		{name: "trailing hyphen", bucket: "application-", diagnostic: "s3 bucket"},
+		{name: "IPv4 address", bucket: "192.0.2.1", diagnostic: "s3 bucket"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newFixture(t)
+			write(t, f.directory, "qa/backend.hcl", []byte(fmt.Sprintf("endpoint = \"https://state.example.test\"\nbucket = %q\nkey = \"qa.tfstate\"\n", test.bucket)))
+			writeJSON(t, f.directory, "deployment.json", f.set)
+			output, err := invoke(t, f.directory, "validate", "--checkout", f.directory, "--config", "deployment.json")
+			assertResult(t, output, err, test.diagnostic)
+		})
 	}
 }
