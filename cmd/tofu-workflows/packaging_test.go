@@ -153,12 +153,12 @@ func assertContainerResult(t *testing.T, result containerResult, diagnostic stri
 	t.Helper()
 	if diagnostic == "" {
 		if result.err != nil || result.stdout != "Consumer inputs are valid.\n" {
-			t.Fatalf("Expected successful validation; stdout=%q stderr=%q error=%v", result.stdout, result.stderr, result.err)
+			t.Fatalf("The validation command failed or returned an unexpected response: stdout=%q stderr=%q error=%v.", result.stdout, result.stderr, result.err)
 		}
 		return
 	}
 	if result.err == nil || !strings.Contains(result.stderr, diagnostic) {
-		t.Fatalf("Expected failure containing %q; stdout=%q stderr=%q error=%v", diagnostic, result.stdout, result.stderr, result.err)
+		t.Fatalf("The validation command did not reject the input with %q: stdout=%q stderr=%q error=%v.", diagnostic, result.stdout, result.stderr, result.err)
 	}
 }
 
@@ -172,11 +172,11 @@ func TestActionContainer(t *testing.T) {
 		}
 		result = project.run(t, containerCall{entrypoint: "tofu"}, "version")
 		if result.err != nil || !strings.HasPrefix(result.stdout, "OpenTofu v"+config.TofuVersion+"\n") {
-			t.Fatalf("Unexpected OpenTofu version; stdout=%q stderr=%q error=%v", result.stdout, result.stderr, result.err)
+			t.Fatalf("The packaged OpenTofu command failed or did not report version %s: stdout=%q stderr=%q error=%v.", config.TofuVersion, result.stdout, result.stderr, result.err)
 		}
 		result = project.run(t, containerCall{entrypoint: "cloudflared"}, "--version")
 		if result.err != nil || !strings.HasPrefix(result.stdout, cloudflaredVersion) {
-			t.Fatalf("Unexpected cloudflared version; stdout=%q stderr=%q error=%v", result.stdout, result.stderr, result.err)
+			t.Fatalf("The packaged cloudflared command failed or did not report %q: stdout=%q stderr=%q error=%v.", cloudflaredVersion, result.stdout, result.stderr, result.err)
 		}
 	})
 	t.Run("validate", func(t *testing.T) {
@@ -233,7 +233,7 @@ func TestActionContainer(t *testing.T) {
 		}
 		for _, line := range strings.Split(strings.TrimSuffix(result.stdout, "\n"), "\n") {
 			if !strings.HasPrefix(line, "::add-mask::") {
-				t.Fatalf("Unexpected credential output: %q", line)
+				t.Fatalf("The credential command printed a line outside the masking protocol: %q.", line)
 			}
 		}
 		encoded := readFile(t, f.environment)
@@ -247,7 +247,7 @@ func TestActionContainer(t *testing.T) {
 		modes := project.run(t, containerCall{entrypoint: "stat"}, "-c", "%a %F %n", credentialDirectory, keyDirectory, key)
 		expectedModes := "700 directory " + credentialDirectory + "\n700 directory " + keyDirectory + "\n600 regular file " + key + "\n"
 		if modes.err != nil || modes.stdout != expectedModes {
-			t.Fatalf("Unexpected credential modes; stdout=%q stderr=%q error=%v", modes.stdout, modes.stderr, modes.err)
+			t.Fatalf("The credential permission check failed or did not report %q: stdout=%q stderr=%q error=%v.", expectedModes, modes.stdout, modes.stderr, modes.err)
 		}
 		contents := project.run(t, containerCall{entrypoint: "cat"}, key)
 		if contents.err != nil || contents.stdout != keyContents {
