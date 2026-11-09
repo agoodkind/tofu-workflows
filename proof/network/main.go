@@ -31,11 +31,16 @@ func main() {
 	}
 	encoder := json.NewEncoder(os.Stdout)
 	failed := false
+
 	for _, destination := range targets {
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		started := time.Now()
 		connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", destination.Address)
-		entry := result{Name: destination.Name, Connected: err == nil, DurationMS: time.Since(started).Milliseconds()}
+		entry := result{
+			Name:       destination.Name,
+			Connected:  err == nil,
+			DurationMS: time.Since(started).Milliseconds(),
+		}
 		if err != nil {
 			failed = true
 			entry.Failure = "connection-failed"
@@ -46,11 +51,13 @@ func main() {
 		} else {
 			connection.Close()
 		}
+
 		cancel()
 		if err := encoder.Encode(entry); err != nil {
 			os.Exit(2)
 		}
 	}
+
 	if failed {
 		os.Exit(1)
 	}

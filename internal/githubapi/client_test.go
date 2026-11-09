@@ -27,6 +27,7 @@ func TestNewClientRejectsAnEmptyToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("NewClient accepted an empty token")
 	}
+
 	if client != nil {
 		t.Fatalf("NewClient returned a client with an empty token: %v", client)
 	}
@@ -37,6 +38,7 @@ func TestNewClientBoundsTheHTTPTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got := client.Client().Timeout; got != expectedTimeout {
 		t.Fatalf("HTTP timeout = %v, want %v", got, expectedTimeout)
 	}
@@ -44,13 +46,15 @@ func TestNewClientBoundsTheHTTPTimeout(t *testing.T) {
 
 func TestNewClientSendsTheTokenToTheConfiguredOrigin(t *testing.T) {
 	var gotAuthorization, gotPath string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuthorization = r.Header.Get("Authorization")
-		gotPath = r.URL.Path
-		if _, err := w.Write([]byte(zenBody)); err != nil {
-			t.Error(err)
-		}
-	}))
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuthorization = r.Header.Get("Authorization")
+			gotPath = r.URL.Path
+			if _, err := w.Write([]byte(zenBody)); err != nil {
+				t.Error(err)
+			}
+		}),
+	)
 	t.Cleanup(server.Close)
 	client := pointAt(t, server.URL)
 
@@ -58,21 +62,26 @@ func TestNewClientSendsTheTokenToTheConfiguredOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if zen != zenBody {
 		t.Fatalf("Zen = %q, want %q", zen, zenBody)
 	}
+
 	if gotPath != zenPath {
 		t.Fatalf("request path = %q, want %q", gotPath, zenPath)
 	}
+
 	if want := "Bearer " + syntheticToken; gotAuthorization != want {
 		t.Fatal("the request did not carry the bearer token")
 	}
 }
 
 func TestNewClientErrorsOmitTheToken(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	}))
+	server := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		}),
+	)
 	t.Cleanup(server.Close)
 	client := pointAt(t, server.URL)
 
@@ -80,6 +89,7 @@ func TestNewClientErrorsOmitTheToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("Zen succeeded against a server that returned 401")
 	}
+
 	if strings.Contains(err.Error(), syntheticToken) {
 		t.Fatal("the request error contains the token")
 	}
@@ -94,9 +104,11 @@ func pointAt(t *testing.T, serverURL string) *github.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	local, err := client.Clone(github.WithEnterpriseURLs(serverURL+apiPath, serverURL+uploadPath))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return local
 }
