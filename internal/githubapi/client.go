@@ -20,11 +20,13 @@ func NewClient(token string) (*github.Client, error) {
 	if token == "" {
 		return nil, errEmptyToken
 	}
+
 	httpClient := &http.Client{Timeout: requestTimeout}
 	client, err := github.NewClient(github.WithHTTPClient(httpClient), github.WithAuthToken(token))
 	if err != nil {
 		slog.Error("GitHub client creation failed", "err", err)
 		return nil, fmt.Errorf("create the GitHub client: %w", err)
 	}
+
 	return client, nil
 }

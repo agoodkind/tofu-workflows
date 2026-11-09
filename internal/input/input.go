@@ -30,7 +30,9 @@ func ImageRepository(value string) bool {
 	if err != nil {
 		return false
 	}
+
 	named, ok := parsed.(reference.Named)
+
 	return ok && named.Name() == value && strings.Contains(value, "/")
 }
 
@@ -40,28 +42,34 @@ func Image(value string) bool {
 	return found && ImageRepository(repository) && Digest(digest)
 }
 
-// Resolve requires an existing path beneath the checkout, including symlink targets.
+// Resolve requires an existing path beneath the checkout, including symlink
+// targets.
 func Resolve(baseDir, name string) (string, error) {
 	if !filepath.IsLocal(name) {
 		return "", errors.New("path must be relative and remain beneath the checkout")
 	}
+
 	base, err := filepath.EvalSymlinks(baseDir)
 	if err != nil {
 		slog.Error("Checkout resolution failed", "err", err)
 		return "", fmt.Errorf("resolve checkout: %w", err)
 	}
+
 	base, err = filepath.Abs(base)
 	if err != nil {
 		return "", fmt.Errorf("resolve checkout: %w", err)
 	}
+
 	resolved, err := filepath.EvalSymlinks(filepath.Join(base, name))
 	if err != nil {
 		return "", fmt.Errorf("resolve %q: %w", name, err)
 	}
+
 	relative, err := filepath.Rel(base, resolved)
 	if err != nil || !filepath.IsLocal(relative) {
 		return "", errors.New("path resolves outside the checkout")
 	}
+
 	return resolved, nil
 }
 
@@ -71,13 +79,16 @@ func RegularFile(baseDir, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	info, err := os.Stat(resolved)
 	if err != nil {
 		slog.Error("Input file inspection failed", "err", err)
 		return "", fmt.Errorf("inspect input file: %w", err)
 	}
+
 	if !info.Mode().IsRegular() {
 		return "", errors.New("input must be a regular file")
 	}
+
 	return resolved, nil
 }
