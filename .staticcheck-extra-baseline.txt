@@ -1,14 +1,14 @@
-# staticcheck-extra: generated_at=2026-11-09T04:40:54Z
-cmd/tofu-workflows/credentials.go:16:1: commandentry: delegate implementation to an importable package [id=5f0dc64e5a16ed0d3203fd6f73a79880:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:152:1: commandentry: delegate implementation to an importable package [id=af3c9730e406638c32e9074eeac4d0fc:1]	# staticcheck-extra:first_added=2026-11-09T04:40:54Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:193:1: commandentry: delegate implementation to an importable package [id=60f3f12c41bda03c0f623de16a2e6f3d:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:231:1: commandentry: delegate implementation to an importable package [id=db1876f45179c6caa4d9e7e8e3878290:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:23:1: commandentry: delegate implementation to an importable package [id=7d7280b8c56d22d0d58deb6e18f37a8e:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:25:1: commandentry: delegate implementation to an importable package [id=57a3f4bd24adbd738833646857e58381:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:30:1: commandentry: delegate implementation to an importable package [id=bbd73c72e11755695de17df1d9ef5bf3:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:41:1: commandentry: delegate implementation to an importable package [id=3a10ed49db1d404ce72051a4c86578c0:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:77:1: commandentry: delegate implementation to an importable package [id=dbc436468b06b293d4df29bce6196ed9:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
-cmd/tofu-workflows/main.go:86:1: commandentry: delegate implementation to an importable package [id=ba9944a39b462e3db5f498efcdfb0768:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T04:40:54Z
+# staticcheck-extra: generated_at=2026-11-09T17:08:23Z
+cmd/tofu-workflows/credentials.go:16:1: commandentry: delegate implementation to an importable package [id=5f0dc64e5a16ed0d3203fd6f73a79880:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:152:1: commandentry: delegate implementation to an importable package [id=af3c9730e406638c32e9074eeac4d0fc:1]	# staticcheck-extra:first_added=2026-11-09T04:40:54Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:193:1: commandentry: delegate implementation to an importable package [id=60f3f12c41bda03c0f623de16a2e6f3d:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:231:1: commandentry: delegate implementation to an importable package [id=db1876f45179c6caa4d9e7e8e3878290:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:23:1: commandentry: delegate implementation to an importable package [id=7d7280b8c56d22d0d58deb6e18f37a8e:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:25:1: commandentry: delegate implementation to an importable package [id=57a3f4bd24adbd738833646857e58381:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:30:1: commandentry: delegate implementation to an importable package [id=bbd73c72e11755695de17df1d9ef5bf3:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:41:1: commandentry: delegate implementation to an importable package [id=3a10ed49db1d404ce72051a4c86578c0:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:77:1: commandentry: delegate implementation to an importable package [id=dbc436468b06b293d4df29bce6196ed9:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
+cmd/tofu-workflows/main.go:86:1: commandentry: delegate implementation to an importable package [id=ba9944a39b462e3db5f498efcdfb0768:1]	# staticcheck-extra:first_added=2026-11-09T03:19:34Z last_seen=2026-11-09T17:08:23Z
 internal/config/config.go:277:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-09T03:18:04Z last_seen=2026-11-09T03:18:04Z
 internal/config/state.go:24:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-09T03:18:04Z last_seen=2026-11-09T03:18:04Z
 internal/credentials/files.go:295:1: doc_structure: add an introduction, explanation, and example or layout	# staticcheck-extra:first_added=2026-11-09T03:18:04Z last_seen=2026-11-09T03:18:04Z
