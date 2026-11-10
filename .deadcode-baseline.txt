@@ -1,0 +1,2 @@
+# deadcode: generated_at=2026-11-10T07:35:30Z
+internal/githubapi/client.go:19:6: unreachable func: NewClient	# deadcode:first_added=2026-11-10T07:35:30Z last_seen=2026-11-10T07:35:30Z
