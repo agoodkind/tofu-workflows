@@ -101,6 +101,9 @@ resolve them with source inspection and disposable tests.
 
 | Area | Required result |
 | --- | --- |
+| PR coverage | Confirm whether plans also run on application-source PRs before a release exists, in addition to Configs PRs. Application-source previews require candidate artifacts and temporary configuration. |
+| Release build ordering | Define how release PRs handle builds that complete out of application merge order, including an earlier failed build. Prevent an older release from silently replacing a newer deployment. |
+| QA concurrency | Decide whether each complete QA-to-production sequence runs serially or whether immutable validation evidence permits overlapping releases. Production must use the exact release that passed QA. |
 | Consumer inputs | Specify the release fields, configuration files, workspace mapping, and health-check interface without hardcoding one application. |
 | Workspace selection | Include every root affected by shared modules, provider pins, or configuration inputs. Prove selection against the current Configs structure. |
 | Runner access | Select credential delivery and verify state-backend, provider API, and lock-endpoint connections. Keep credentials private throughout cleanup and failure handling. |
