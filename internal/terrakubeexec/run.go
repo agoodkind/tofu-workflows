@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -50,12 +51,16 @@ type commandRunner func(context.Context, command) error
 func Run(
 	ctx context.Context,
 	args []string,
-	getenv func(string) string,
+	environment []string,
 	stdout io.Writer,
 	stderr io.Writer,
 ) error {
 	if len(args) != 1 {
 		return errSelectorRequired
+	}
+
+	getenv := func(name string) string {
+		return environmentValue(environment, name)
 	}
 
 	selected := deployment{selector: args[0], workspace: getenv("workspaceName")}
@@ -90,7 +95,22 @@ func Run(
 		return errMissingJobIdentity
 	}
 
-	return deployFromCheckout(ctx, selected, origin, gitToken, getenv, stdout, stderr, receipt)
+	if err := protectResolverProcess(); err != nil {
+		return err
+	}
+
+	return deployFromCheckout(ctx, selected, origin, gitToken, environment, stdout, stderr, receipt)
+}
+
+func environmentValue(environment []string, name string) string {
+	prefix := name + "="
+	for _, entry := range environment {
+		if value, ok := strings.CutPrefix(entry, prefix); ok {
+			return value
+		}
+	}
+
+	return ""
 }
 
 func deployFromCheckout(
@@ -98,7 +118,7 @@ func deployFromCheckout(
 	selected deployment,
 	origin string,
 	gitToken string,
-	getenv func(string) string,
+	workspaceEnvironment []string,
 	stdout io.Writer,
 	stderr io.Writer,
 	receipt deploymentReceipt,
@@ -112,41 +132,46 @@ func deployFromCheckout(
 	if err != nil {
 		return executionError("create private job directory", err)
 	}
-	defer os.RemoveAll(private)
+	defer func() {
+		if err := os.RemoveAll(private); err != nil {
+			slog.Error("Remove protected job directory", "err", err)
+		}
+	}()
 
 	paths, err := prepareDirectories(private)
 	if err != nil {
 		return err
 	}
 
-	environment := isolatedEnvironment(paths, origin, gitToken)
-	git := runner(root, environment, stderr)
+	environment := isolatedEnvironment(paths)
+	gitEnvironment := append(slices.Clone(environment), gitCredentials(origin, gitToken)...)
+	git := runner(root, gitEnvironment, stderr)
 	commit, err := prepareCheckout(ctx, git, origin, selected.branch, root)
 	if err != nil {
 		return err
 	}
 
-	if err := requireEnrollment(ctx, git, commit, selected); err != nil {
-		return err
-	}
-
-	providerToken, err := prepareCredentials(paths, getenv)
+	identity, err := requireEnrollment(ctx, git, commit, selected)
 	if err != nil {
 		return err
 	}
 
-	socket, stopAgent, err := prepareSSH(ctx, root, environment, paths, getenv)
+	secrets, err := resolveDeploymentSecrets(
+		ctx, git, commit, identity, workspaceEnvironment,
+		func(dir string, values []string) commandRunner { return runner(dir, values, nil) },
+		paths.root, environment,
+	)
+	if err != nil {
+		return err
+	}
+
+	socket, stopAgent, err := prepareSSH(ctx, paths.root, environment, paths, secrets.sshKey, secrets.sshKnownHosts)
 	if err != nil {
 		return err
 	}
 	defer stopAgent()
 
-	environment = append(
-		environment,
-		"SSH_AUTH_SOCK="+socket,
-		"CONFIGSCTL_VAULT_FILE="+paths.vaultPath(),
-		"TF_IN_AUTOMATION=1",
-	)
+	tofuEnvironment, installEnvironment := secrets.commandEnvironments(gitEnvironment, socket)
 
 	receipt.CommitID = commit
 	slog.Info(
@@ -185,8 +210,8 @@ func deployFromCheckout(
 		selected:     selected,
 		paths:        paths,
 		initReadOnly: lockFile != "",
-		run:          runner(root, environment, stderr),
-		install:      runner(root, append(environment, "GH_TOKEN="+providerToken), stderr),
+		run:          runner(root, tofuEnvironment, stderr),
+		install:      runner(root, installEnvironment, stderr),
 		verify:       verify,
 		output:       stdout,
 		publishPlan:  func() error { return publishPlanLog(paths.tmp, stdout) },
@@ -227,6 +252,8 @@ func runner(directory string, environment []string, stderr io.Writer) commandRun
 		switch task.name {
 		case configsctl:
 			process = exec.CommandContext(ctx, configsctl)
+		case opCLI:
+			process = exec.CommandContext(ctx, opCLI)
 		case "/usr/bin/git":
 			process = exec.CommandContext(ctx, "/usr/bin/git")
 		case "/usr/bin/ssh-agent":

@@ -14,7 +14,10 @@ ADD --checksum=sha256:5dcc4e282b9c22c0d31c217805976448c966cfc56c20157c78385a8a62
 ADD --checksum=sha256:c554878f62506c88464ef94474322d899dfb30468bb234f23e2355e8e1613cb2 https://github.com/cli/cli/releases/download/v2.85.0/gh_2.85.0_linux_arm64.tar.gz /tmp/gh-arm64.tar.gz
 RUN tar -xzf "/tmp/gh-${TARGETARCH}.tar.gz" -C /tmp --strip-components=2 "gh_2.85.0_linux_${TARGETARCH}/bin/gh"
 
+FROM docker.io/1password/op:2.42.0@sha256:b0d7eebcb09bdc9d5862af91533e1851c968d4f969270c906f5da8c574f87e93 AS onepassword
+
 FROM docker.io/azbuilder/executor:2.34.3@sha256:815bade5764fad24a293157516ad87f5fb611d129020b6facfdca42c75be82ff
 COPY --from=ghcr.io/opentofu/opentofu:1.13.9@sha256:f5aef7f2632b490e3c289a239d7974497d0583f3df6bfa35e8eb31a367ee5ec0 /usr/local/bin/tofu /usr/local/bin/tofu
 COPY --from=github-cli /tmp/gh /usr/local/bin/gh
+COPY --from=onepassword /usr/local/bin/op /usr/local/bin/op
 COPY --from=build /out/configsctl /out/terrakube-configs /usr/local/bin/

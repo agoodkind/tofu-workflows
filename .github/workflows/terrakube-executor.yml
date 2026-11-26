@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 20
     env:
       EXECUTOR_IMAGE: ghcr.io/agoodkind/tofu-workflows-terrakube-executor
-      CONFIGSCTL_COMMIT: e792c43fb63955ce66c88ade6876c61378e52cce
+      CONFIGSCTL_COMMIT: 4552211ad9f6489f5e296f685725e1db331fba36
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

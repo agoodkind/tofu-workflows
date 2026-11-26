@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
-	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,10 +22,6 @@ type jobPaths struct {
 	tmp  string
 }
 
-func (p jobPaths) vaultPath() string {
-	return filepath.Join(p.root, "vault.yml")
-}
-
 func prepareDirectories(root string) (jobPaths, error) {
 	paths := jobPaths{
 		root: root,
@@ -36,7 +30,6 @@ func prepareDirectories(root string) (jobPaths, error) {
 	}
 	for _, directory := range []string{
 		paths.tmp,
-		filepath.Join(paths.home, ".config", "ansible"),
 		filepath.Join(paths.home, ".ssh"),
 		filepath.Join(paths.home, ".cache"),
 	} {
@@ -48,9 +41,7 @@ func prepareDirectories(root string) (jobPaths, error) {
 	return paths, nil
 }
 
-func isolatedEnvironment(paths jobPaths, origin, gitToken string) []string {
-	authorization := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + gitToken))
-
+func isolatedEnvironment(paths jobPaths) []string {
 	return []string{
 		"PATH=/usr/local/bin:/usr/bin:/bin",
 		"HOME=" + paths.home,
@@ -59,6 +50,13 @@ func isolatedEnvironment(paths jobPaths, origin, gitToken string) []string {
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_TERMINAL_PROMPT=0",
+	}
+}
+
+func gitCredentials(origin, gitToken string) []string {
+	authorization := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + gitToken))
+
+	return []string{
 		"GIT_CONFIG_COUNT=2",
 		"GIT_CONFIG_KEY_0=http." + origin + ".extraHeader",
 		"GIT_CONFIG_VALUE_0=Authorization: Basic " + authorization,
@@ -67,54 +65,16 @@ func isolatedEnvironment(paths jobPaths, origin, gitToken string) []string {
 	}
 }
 
-func prepareCredentials(paths jobPaths, getenv func(string) string) (string, error) {
-	for _, credential := range []struct{ key, path string }{
-		{key: "CONFIGS_DEPLOY_VAULT", path: paths.vaultPath()},
-		{
-			key:  "CONFIGS_DEPLOY_VAULT_PASSWORD",
-			path: filepath.Join(paths.home, ".config", "ansible", "vault.pass"),
-		},
-		{
-			key:  "CONFIGS_DEPLOY_SSH_KNOWN_HOSTS",
-			path: filepath.Join(paths.home, ".ssh", "known_hosts"),
-		},
-	} {
-		value := getenv(credential.key)
-		if value == "" {
-			slog.Error(
-				"Missing deployment credential",
-				"input",
-				credential.key,
-				"err",
-				errMissingDeploymentInput,
-			)
-
-			return "", fmt.Errorf("%w: %s", errMissingDeploymentInput, credential.key)
-		}
-
-		if err := os.WriteFile(credential.path, []byte(value), privateMode); err != nil {
-			return "", executionError("write protected "+credential.key+" file", err)
-		}
-	}
-
-	token := getenv("CONFIGS_DEPLOY_PROVIDER_TOKEN")
-	if token == "" {
-		return "", errMissingProviderToken
-	}
-
-	return token, nil
-}
-
 func prepareSSH(
 	ctx context.Context,
 	dir string,
 	environment []string,
 	paths jobPaths,
-	getenv func(string) string,
+	key string,
+	knownHosts string,
 ) (string, func(), error) {
-	key := getenv("CONFIGS_DEPLOY_SSH_PRIVATE_KEY")
-	if key == "" {
-		return "", nil, errMissingSSHIdentity
+	if err := os.WriteFile(filepath.Join(paths.home, ".ssh", "known_hosts"), []byte(knownHosts), privateMode); err != nil {
+		return "", nil, executionError("write protected SSH known hosts file", err)
 	}
 
 	socket := filepath.Join(paths.root, "agent.sock")
@@ -167,9 +127,4 @@ func agentPID(response string) int {
 	return 0
 }
 
-var (
-	errMissingDeploymentInput = errors.New("workspace is missing a required environment input")
-	errMissingProviderToken   = errors.New("workspace requires CONFIGS_DEPLOY_PROVIDER_TOKEN")
-	errMissingSSHIdentity     = errors.New("workspace requires CONFIGS_DEPLOY_SSH_PRIVATE_KEY")
-	errMissingSSHAgentPID     = errors.New("SSH agent did not report its process ID")
-)
+var errMissingSSHAgentPID = errors.New("SSH agent did not report its process ID")

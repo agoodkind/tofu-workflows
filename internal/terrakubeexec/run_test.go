@@ -187,14 +187,8 @@ func TestCheckoutRejectsACommitOutsideTrustedMainFirstParent(t *testing.T) {
 }
 
 func TestPreviewWorkspaceCannotSelectDeploymentCredentials(t *testing.T) {
-	getenv := func(key string) string {
-		if key != "workspaceName" {
-			t.Fatalf("preview read environment variable %q", key)
-		}
-
-		return "tack-qa-preview"
-	}
-	err := Run(t.Context(), []string{"suburban/tack-qa"}, getenv, io.Discard, io.Discard)
+	environment := []string{"workspaceName=tack-qa-preview"}
+	err := Run(t.Context(), []string{"suburban/tack-qa"}, environment, io.Discard, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "promotion branch") {
 		t.Fatalf("expected mismatched deployment workspace refusal, got %v", err)
 	}

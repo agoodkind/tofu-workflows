@@ -16,7 +16,7 @@ import (
 func Main(arguments []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := Run(ctx, arguments[1:], os.Getenv, os.Stdout, os.Stderr); err != nil {
+	if err := Run(ctx, arguments[1:], os.Environ(), os.Stdout, os.Stderr); err != nil {
 		slog.Error("Configs deployment failed", "err", err)
 
 		return 1
