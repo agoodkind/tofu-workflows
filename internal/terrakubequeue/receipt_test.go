@@ -3,6 +3,7 @@ package terrakubequeue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -41,17 +42,33 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 			tc.name,
 			func(t *testing.T) {
 				source := &state{current: commit, next: "next"}
+				issuedTokens := 0
+				requests := 0
 				client := apiClient{
 					BaseURL:      "https://example.invalid/api/v1",
 					Organization: org,
 					Workspace:    workspace,
 					Template:     step,
-					Token:        t.Name(),
+
+					Token: func(_ context.Context, audience string) (string, error) {
+						if audience != "terrakube-configs-deploy" {
+							t.Fatal(audience)
+						}
+
+						issuedTokens++
+
+						return fmt.Sprintf("%s-%d", t.Name(), issuedTokens), nil
+					},
 				}
 				jobs := 0
 				client.Client = &http.Client{
 					Transport: receiptTransport(func(req *http.Request) (*http.Response, error) {
-						if req.Header.Get("Authorization") != "Bearer "+t.Name() {
+						requests++
+						if req.Header.Get("Authorization") != fmt.Sprintf(
+							"Bearer %s-%d",
+							t.Name(),
+							requests,
+						) {
 							t.Fatal("missing scoped authorization")
 						}
 

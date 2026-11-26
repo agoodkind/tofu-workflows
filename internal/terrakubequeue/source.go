@@ -19,6 +19,7 @@ type gitSource struct {
 	Directory string
 	Branch    string
 	Root      string
+	Shared    []string
 }
 
 func (g gitSource) git(ctx context.Context, args ...string) (string, error) {
@@ -69,7 +70,7 @@ func (g gitSource) nextCommit(ctx context.Context, current string) (string, erro
 
 	for indexFromTip := index - 1; indexFromTip >= 0; indexFromTip-- {
 		commit := commits[indexFromTip]
-		affected, err := Affected(ctx, g.Directory, g.Root, commits[indexFromTip+1], commit)
+		affected, err := g.affected(ctx, commits[indexFromTip+1], commit)
 		if err != nil {
 			return "", err
 		}
@@ -139,39 +140,20 @@ var (
 	errRevision = errors.New("promotion requires full commit IDs")
 )
 
-// Affected checks a revision for changes to workspace inputs.
-//
-// It compares the supplied Git trees and reads local module declarations in
-// both trees without executing code from either revision.
-//
-// Example:
-//
-//	changed, err := Affected(ctx, checkout, root, mergeBase, pullRequestHead)
-func Affected(ctx context.Context, checkout, root, base, head string) (bool, error) {
+func (source gitSource) affected(ctx context.Context, base, head string) (bool, error) {
 	base = canonicalCommit(base)
 	head = canonicalCommit(head)
 	if base == "" || head == "" {
 		return false, errRevision
 	}
 
-	source := gitSource{Directory: checkout, Root: root}
 	files, err := source.git(ctx, "diff", "--no-renames", "--name-only", "-z", base, head, "--")
 	if err != nil {
 		return false, err
 	}
 
 	changed := strings.Split(files, "\x00")
-	paths := []string{
-		root,
-		"configsctl",
-		"configsctl.yml",
-		"common",
-		"ansible/inventory/group_vars/all",
-		"opentofu/guest",
-		"opentofu/shared",
-		"opentofu/terraform.d",
-		"opentofu/terraform.tfvars",
-	}
+	paths := append(slices.Clone(source.Shared), source.Root)
 	if affects(changed, paths) {
 		return true, nil
 	}

@@ -2,21 +2,23 @@ package terrakubequeue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"path"
 	"time"
+
+	"github.com/sethvargo/go-githubactions"
 )
 
 const (
 	argumentCount         = 3
 	affectedArgumentCount = 6
-	qaRoot                = "opentofu/suburban/tack-qa"
-	prodRoot              = "opentofu/vault/tack-prod"
-	requestTimeout        = 30 * time.Second
+	matrixArgumentCount   = 4
+
+	requestTimeout = 30 * time.Second
 )
 
 // run reconciles one Configs workspace with its protected branch.
@@ -28,38 +30,43 @@ const (
 //
 //	terrakube-queue tack-qa /workspace/configs
 func run(ctx context.Context, args []string) error {
-	if len(args) > 1 && args[1] == "affected" {
-		if len(args) != affectedArgumentCount {
-			return errAffectedUsage
-		}
-
-		root := map[string]string{qaRoot: qaRoot, prodRoot: prodRoot}[args[3]]
-		if root == "" {
-			return errWorkspaceName
-		}
-
-		changed, err := Affected(ctx, args[2], root, args[4], args[5])
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintln(os.Stdout, changed)
-
-		return nil
+	if len(args) < argumentCount {
+		return errUsage
 	}
 
+	entries, err := readTargets(ctx, args[2])
+	if err != nil {
+		return err
+	}
+
+	switch queueCommand(args[1]) {
+	case matrixMode:
+		return matrixCommand(args, entries)
+	case affectedMode:
+		return affectedCommand(ctx, args, entries)
+	}
+
+	return runDeployment(ctx, args, entries)
+}
+
+func runDeployment(ctx context.Context, args []string, entries []target) error {
 	if len(args) != argumentCount {
 		return errUsage
 	}
 
-	workspace := args[1]
-	roots := map[string]string{
-		"tack-qa":   qaRoot,
-		"tack-prod": prodRoot,
+	var selected target
+
+	for _, entry := range entries {
+		if entry.Name == args[1] {
+			selected = entry
+
+			break
+		}
 	}
-	root, ok := roots[workspace]
-	if !ok {
-		return errWorkspaceName
+
+	if selected.Enabled == nil || !*selected.Enabled ||
+		selected.Environment != os.Getenv("PROMOTION_ENVIRONMENT") {
+		return errDisabled
 	}
 
 	baseline := os.Getenv("TERRAKUBE_BASELINE_SHA")
@@ -69,8 +76,9 @@ func run(ctx context.Context, args []string) error {
 
 	source := gitSource{
 		Directory: args[2],
-		Branch:    "terrakube/" + path.Base(root),
-		Root:      root,
+		Branch:    selected.Branch,
+		Root:      selected.Root,
+		Shared:    selected.Shared,
 	}
 	client := &http.Client{
 		Timeout:       requestTimeout,
@@ -81,7 +89,7 @@ func run(ctx context.Context, args []string) error {
 		Organization: os.Getenv("TERRAKUBE_ORGANIZATION_ID"),
 		Workspace:    os.Getenv("TERRAKUBE_WORKSPACE_ID"),
 		Template:     os.Getenv("TERRAKUBE_TEMPLATE_ID"),
-		Token:        os.Getenv("TERRAKUBE_TOKEN"),
+		Token:        githubactions.GetIDToken,
 		Client:       client,
 	}
 	if err := api.validate(); err != nil {
@@ -99,8 +107,8 @@ var (
 	errAffectedUsage = errors.New(
 		"usage: terrakube-queue affected CONFIGS_CHECKOUT ROOT BASE_SHA HEAD_SHA",
 	)
-	errUsage         = errors.New("usage: terrakube-queue tack-qa|tack-prod CONFIGS_CHECKOUT")
-	errWorkspaceName = errors.New("select tack-qa or tack-prod")
+	errUsage         = errors.New("usage: terrakube-queue DEPLOYMENT CONFIGS_CHECKOUT")
+	errWorkspaceName = errors.New("workspace is not enrolled in reviewed Configs main")
 	errBaseline      = errors.New(
 		"TERRAKUBE_BASELINE_SHA must be the full initial promotion commit",
 	)
@@ -156,3 +164,54 @@ func drain(
 		}
 	}
 }
+
+func affectedCommand(ctx context.Context, args []string, entries []target) error {
+	if len(args) != affectedArgumentCount {
+		return errAffectedUsage
+	}
+
+	for _, entry := range entries {
+		if entry.Root == args[3] {
+			source := gitSource{Directory: args[2], Root: entry.Root, Shared: entry.Shared}
+			changed, err := source.affected(ctx, args[4], args[5])
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintln(os.Stdout, changed)
+
+			return nil
+		}
+	}
+
+	return errWorkspaceName
+}
+
+func matrixCommand(args []string, entries []target) error {
+	if len(args) != matrixArgumentCount || (args[3] != "deploy" && args[3] != "preview") {
+		return errUsage
+	}
+
+	selected := []target{}
+
+	for _, entry := range entries {
+		if args[3] == "preview" || *entry.Enabled {
+			selected = append(selected, entry)
+		}
+	}
+
+	if err := json.NewEncoder(os.Stdout).Encode(selected); err != nil {
+		slog.Error("write target matrix", "err", err)
+
+		return fmt.Errorf("write enrollment matrix: %w", err)
+	}
+
+	return nil
+}
+
+type queueCommand string
+
+const (
+	matrixMode   queueCommand = "matrix"
+	affectedMode queueCommand = "affected"
+)

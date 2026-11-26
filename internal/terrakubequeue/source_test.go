@@ -1,6 +1,7 @@
 package terrakubequeue
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,6 +66,10 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
  config = templatefile("${path.module}/../modules/docker-guest/files/ndppd.conf.tftpl", {})
 }`,
 	)
+	write(
+		registryPath,
+		`{"version":1,"apps":[{"name":"first","repository":"org/first","deployments":[{"name":"qa","root":"opentofu/qa","promotion_branch":"terrakube/qa","environment":"qa","enabled":false,"shared_inputs":["external/shared"]}]}]}`,
+	)
 	base := commit()
 	run(local, "push", "origin", "HEAD:refs/heads/terrakube/tack-qa")
 	write("opentofu/modules/unrelated/main.tf", "")
@@ -83,6 +88,19 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 	write("external/module/config", "new")
 	external := commit()
 	run(local, "push", "origin", "main")
+	write(registryPath, "this unreviewed worktree content must not become deployment input")
+	entries, err := readTargets(t.Context(), local)
+	if err != nil || len(entries) != 1 || entries[0].Name != "qa" || *entries[0].Enabled {
+		t.Fatalf("expected disabled target from reviewed main: %v", err)
+	}
+
+	if err := runDeployment(
+		t.Context(),
+		[]string{"queue", "qa", local},
+		entries,
+	); !errors.Is(err, errDisabled) {
+		t.Fatal("disabled target should fail before authorization", err)
+	}
 
 	for _, pair := range [][2]string{
 		{base, first},

@@ -62,7 +62,10 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 		return fmt.Errorf("prepare job log request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+client.Token)
+	if err := client.authorize(ctx, req); err != nil {
+		return err
+	}
+
 	res, err := client.Client.Do(req)
 	if err != nil {
 		slog.ErrorContext(ctx, "read deployment receipt", "job", job.ID, "err", err)

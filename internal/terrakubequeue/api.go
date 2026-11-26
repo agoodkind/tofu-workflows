@@ -24,7 +24,7 @@ type apiClient struct {
 	Organization string
 	Workspace    string
 	Template     string
-	Token        string
+	Token        func(context.Context, string) (string, error)
 	Client       *http.Client
 }
 
@@ -40,7 +40,7 @@ func (client apiClient) validate() error {
 
 	if !uuid.MatchString(client.Organization) || !uuid.MatchString(client.Workspace) ||
 		!uuid.MatchString(client.Template) ||
-		client.Token == "" {
+		client.Token == nil {
 		return errMissingAPISettings
 	}
 
@@ -106,7 +106,10 @@ func request[T resource | []resource](
 		return fmt.Errorf("prepare job API request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+client.Token)
+	if err := client.authorize(ctx, req); err != nil {
+		return err
+	}
+
 	req.Header.Set("Accept", mediaType)
 	if body != nil {
 		req.Header.Set("Content-Type", mediaType)
@@ -235,10 +238,24 @@ func (client apiClient) verifyWorkspace(ctx context.Context, branch string) erro
 var (
 	errAPIURL             = errors.New("configure an HTTPS API base URL")
 	errMissingAPISettings = errors.New(
-		"configure organization, workspace and template UUIDs and a bearer token",
+		"configure organization, workspace and template UUIDs and GitHub OIDC",
 	)
 	errMissingJob      = errors.New("job API did not return a job")
 	errUnexpectedJob   = errors.New("job API returned a job outside the requested submission")
 	errWorkspacePolicy = errors.New("workspace branch or deployment template does not match")
 	errWorkspaceSource = errors.New("workspace must use the trusted Configs HTTPS repository")
 )
+
+func (client apiClient) authorize(ctx context.Context, req *http.Request) error {
+	const audience = "terrakube-configs-deploy"
+	token, err := client.Token(ctx, audience)
+	if err != nil || token == "" {
+		return errOIDC
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	return nil
+}
+
+var errOIDC = errors.New("GitHub did not issue a Terrakube deployment identity token")
