@@ -125,7 +125,7 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 func affects(files, dirs []string) bool {
 	for _, file := range files {
 		for _, dir := range dirs {
-			if file == dir || strings.HasPrefix(file, dir+"/") {
+			if file != "" && (dir == "." || file == dir || strings.HasPrefix(file, dir+"/")) {
 				return true
 			}
 		}
@@ -141,8 +141,8 @@ var (
 
 // Affected checks a revision for changes to workspace inputs.
 //
-// It compares the supplied Git trees and reads local module declarations from
-// the head tree without executing code from either revision.
+// It compares the supplied Git trees and reads local module declarations in
+// both trees without executing code from either revision.
 //
 // Example:
 //
@@ -176,16 +176,22 @@ func Affected(ctx context.Context, checkout, root, base, head string) (bool, err
 		return true, nil
 	}
 
-	if !affects(changed, []string{"opentofu/modules"}) {
+	if files == "" {
 		return false, nil
 	}
 
-	modules, err := source.modulePaths(ctx, head)
-	if err != nil {
-		return false, err
+	for _, sha := range []string{base, head} {
+		modules, err := source.modulePaths(ctx, sha)
+		if err != nil {
+			return false, err
+		}
+
+		if affects(changed, modules) {
+			return true, nil
+		}
 	}
 
-	return affects(changed, modules), nil
+	return false, nil
 }
 
 func canonicalCommit(value string) string {

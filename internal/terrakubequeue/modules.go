@@ -15,6 +15,7 @@ import (
 
 func (g gitSource) modulePaths(ctx context.Context, sha string) ([]string, error) {
 	visited := map[string]bool{}
+	var inputs []string
 
 	pending := []string{g.Root}
 	for len(pending) > 0 {
@@ -41,10 +42,12 @@ func (g gitSource) modulePaths(ctx context.Context, sha string) ([]string, error
 				return nil, err
 			}
 
-			modules, err := moduleSources(name, []byte(contents+"\n"))
+			modules, dependencies, err := moduleSources(name, []byte(contents+"\n"), dir, g.Root)
 			if err != nil {
 				return nil, err
 			}
+
+			inputs = append(inputs, dependencies...)
 
 			for _, module := range modules {
 				if !strings.HasPrefix(module, "./") && !strings.HasPrefix(module, "../") {
@@ -81,10 +84,10 @@ func (g gitSource) modulePaths(ctx context.Context, sha string) ([]string, error
 
 	slices.Sort(dirs)
 
-	return dirs, nil
+	return append(dirs, inputs...), nil
 }
 
-func moduleSources(name string, contents []byte) ([]string, error) {
+func moduleSources(name string, contents []byte, dir, root string) ([]string, []string, error) {
 	parser := hclparse.NewParser()
 	var file *hcl.File
 	var diagnostics hcl.Diagnostics
@@ -97,14 +100,14 @@ func moduleSources(name string, contents []byte) ([]string, error) {
 	if diagnostics.HasErrors() {
 		slog.Error("read module configuration", "file", name, "err", diagnostics)
 
-		return nil, fmt.Errorf("parse %s: %w", name, diagnostics)
+		return nil, nil, fmt.Errorf("parse %s: %w", name, diagnostics)
 	}
 
 	blocks, _, diagnostics := file.Body.PartialContent(&hcl.BodySchema{
 		Blocks: []hcl.BlockHeaderSchema{{Type: "module", LabelNames: []string{"name"}}},
 	})
 	if diagnostics.HasErrors() {
-		return nil, fmt.Errorf("read modules in %s: %w", name, diagnostics)
+		return nil, nil, fmt.Errorf("read modules in %s: %w", name, diagnostics)
 	}
 
 	var sources []string
@@ -114,12 +117,12 @@ func moduleSources(name string, contents []byte) ([]string, error) {
 			Attributes: []hcl.AttributeSchema{{Name: "source", Required: true}},
 		})
 		if diag.HasErrors() {
-			return nil, fmt.Errorf("read module source in %s: %w", name, diag)
+			return nil, nil, fmt.Errorf("read module source in %s: %w", name, diag)
 		}
 
 		value, diag := attrs.Attributes["source"].Expr.Value(nil)
 		if diag.HasErrors() || value.IsNull() || !value.Type().Equals(cty.String) {
-			return nil, fmt.Errorf(
+			return nil, nil, fmt.Errorf(
 				"%w: module source in %s must be a literal string",
 				errQueue,
 				name,
@@ -129,5 +132,7 @@ func moduleSources(name string, contents []byte) ([]string, error) {
 		sources = append(sources, value.AsString())
 	}
 
-	return sources, nil
+	inputs, err := fileInputs(file, dir, root)
+
+	return sources, inputs, err
 }

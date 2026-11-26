@@ -53,7 +53,18 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		return rev
 	}
 	write("opentofu/qa/main.tf", `module "shared" { source = "../modules/shared" }`)
-	write("opentofu/modules/shared/main.tf", "")
+	write(
+		"opentofu/modules/shared/main.tf",
+		`module "external" { source = "../../../external/module" }`,
+	)
+	write("external/module/main.tf", "")
+	write(
+		"opentofu/qa/ndppd.tf",
+		`locals {
+ service = file("${path.module}/../modules/docker-guest/files/ndppd.service")
+ config = templatefile("${path.module}/../modules/docker-guest/files/ndppd.conf.tftpl", {})
+}`,
+	)
 	base := commit()
 	run(local, "push", "origin", "HEAD:refs/heads/terrakube/tack-qa")
 	write("opentofu/modules/unrelated/main.tf", "")
@@ -62,9 +73,25 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 	first := commit()
 	write("opentofu/qa/input", "second")
 	second := commit()
+	patch := "opentofu/modules/docker-guest/files/ndppd.service"
+	write(patch, "service")
+	service := commit()
+	write("opentofu/modules/docker-guest/files/ndppd.conf.tftpl", "config")
+	config := commit()
+	run(local, "rm", patch)
+	removed := commit()
+	write("external/module/config", "new")
+	external := commit()
 	run(local, "push", "origin", "main")
 
-	for _, pair := range [][2]string{{base, first}, {first, second}} {
+	for _, pair := range [][2]string{
+		{base, first},
+		{first, second},
+		{second, service},
+		{service, config},
+		{config, removed},
+		{removed, external},
+	} {
 		next, err := src.nextCommit(t.Context(), pair[0])
 		if err != nil || next != pair[1] {
 			t.Fatalf("next %s: %v", next, err)
@@ -79,7 +106,7 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		}
 	}
 
-	if next, err := src.nextCommit(t.Context(), second); err != nil || next != "" {
+	if next, err := src.nextCommit(t.Context(), external); err != nil || next != "" {
 		t.Fatalf("caught up %q: %v", next, err)
 	}
 }
