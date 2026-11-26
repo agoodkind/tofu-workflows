@@ -1,0 +1,244 @@
+package terrakubequeue
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
+)
+
+const (
+	mediaType = "application/vnd.api+json"
+	jobType   = "job"
+)
+
+type apiClient struct {
+	BaseURL      string
+	Organization string
+	Workspace    string
+	Template     string
+	Token        string
+	Client       *http.Client
+}
+
+var uuid = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+func (client apiClient) validate() error {
+	u, err := url.Parse(client.BaseURL)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
+		u.RawQuery != "" ||
+		u.Fragment != "" {
+		return errAPIURL
+	}
+
+	if !uuid.MatchString(client.Organization) || !uuid.MatchString(client.Workspace) ||
+		!uuid.MatchString(client.Template) ||
+		client.Token == "" {
+		return errMissingAPISettings
+	}
+
+	return nil
+}
+
+type identifier struct {
+	Type string `json:"type"`
+	ID   string `json:"id,omitempty"`
+}
+
+type attributes struct {
+	Comments                        string    `json:"comments"`
+	Template                        string    `json:"templateReference"`
+	Status                          jobStatus `json:"status,omitempty"`
+	Source                          string    `json:"source,omitempty"`
+	Branch                          string    `json:"branch,omitempty"`
+	DefaultTemplate                 string    `json:"defaultTemplate,omitempty"`
+	RestrictApplyToConfiguredBranch bool      `json:"restrictApplyToConfiguredBranch,omitempty"`
+	Commit                          string    `json:"commitId,omitempty"`
+}
+
+type resource struct {
+	identifier
+
+	Attributes    attributes `json:"attributes"`
+	Relationships struct {
+		Workspace struct {
+			Data identifier `json:"data"`
+		} `json:"workspace"`
+	} `json:"relationships"`
+}
+
+func (client apiClient) job(sha string) resource {
+	var record resource
+	record.Type = jobType
+	record.Attributes = attributes{Comments: "configs-main-" + sha, Template: client.Template}
+	record.Relationships.Workspace.Data = identifier{Type: "workspace", ID: client.Workspace}
+
+	return record
+}
+
+type envelope[T resource | []resource] struct {
+	Data T `json:"data"`
+}
+
+func request[T resource | []resource](
+	ctx context.Context,
+	client apiClient,
+	method string,
+	suffix string,
+	body io.Reader,
+	output *envelope[T],
+) error {
+	endpoint := strings.TrimRight(
+		client.BaseURL,
+		"/",
+	) + "/organization/" + client.Organization + suffix
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		slog.ErrorContext(ctx, "create Terrakube request", "error", err)
+
+		return fmt.Errorf("prepare job API request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+client.Token)
+	req.Header.Set("Accept", mediaType)
+	if body != nil {
+		req.Header.Set("Content-Type", mediaType)
+	}
+
+	res, err := client.Client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send job API request: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("%w: Terrakube %s job request returned %s", errQueue, method, res.Status)
+	}
+
+	if err := json.NewDecoder(res.Body).Decode(output); err != nil {
+		return fmt.Errorf("decode job API response: %w", err)
+	}
+
+	return nil
+}
+
+func (client apiClient) submit(ctx context.Context, sha string) (string, error) {
+	record := client.job(sha)
+	data, err := json.Marshal(
+		struct {
+			Data resource `json:"data"`
+		}{
+			record,
+		},
+	)
+	if err != nil {
+		slog.ErrorContext(ctx, "encode Terrakube job", "error", err)
+
+		return "", fmt.Errorf("encode job: %w", err)
+	}
+
+	var response envelope[resource]
+	if err := request(
+		ctx,
+		client,
+		http.MethodPost,
+		"/job",
+		bytes.NewReader(data),
+		&response,
+	); err != nil {
+		return "", err
+	}
+
+	if response.Data.Type != jobType {
+		return "", errMissingJob
+	}
+
+	return response.Data.ID, nil
+}
+
+func (client apiClient) lookup(ctx context.Context, sha string) ([]jobRecord, error) {
+	wanted := client.job(sha)
+	query := url.Values{}
+	query.Set(
+		"filter[job]",
+		"workspace.id=="+client.Workspace+";comments=="+wanted.Attributes.Comments+";templateReference=="+client.Template,
+	)
+	var response envelope[[]resource]
+	if err := request(
+		ctx,
+		client,
+		http.MethodGet,
+		"/job?"+query.Encode(),
+		nil,
+		&response,
+	); err != nil {
+		return nil, err
+	}
+
+	var jobs []jobRecord
+
+	for _, record := range response.Data {
+		if record.Type != jobType || record.ID == "" ||
+			record.Attributes.Comments != wanted.Attributes.Comments ||
+			record.Attributes.Template != client.Template ||
+			record.Relationships.Workspace.Data.ID != client.Workspace {
+			return nil, errUnexpectedJob
+		}
+
+		jobs = append(
+			jobs,
+			jobRecord{
+				ID:     record.ID,
+				Status: record.Attributes.Status,
+				Commit: record.Attributes.Commit,
+			},
+		)
+	}
+
+	return jobs, nil
+}
+
+func (client apiClient) verifyWorkspace(ctx context.Context, branch string) error {
+	var response envelope[resource]
+	if err := request(
+		ctx,
+		client,
+		http.MethodGet,
+		"/workspace/"+client.Workspace,
+		nil,
+		&response,
+	); err != nil {
+		return err
+	}
+
+	workspace := response.Data.Attributes
+	if response.Data.Type != "workspace" || response.Data.ID != client.Workspace ||
+		workspace.Branch != branch ||
+		!workspace.RestrictApplyToConfiguredBranch ||
+		workspace.DefaultTemplate != client.Template {
+		return errWorkspacePolicy
+	}
+
+	if strings.TrimSuffix(workspace.Source, ".git") != "https://github.com/agoodkind/configs" {
+		return errWorkspaceSource
+	}
+
+	return nil
+}
+
+var (
+	errAPIURL             = errors.New("configure an HTTPS API base URL")
+	errMissingAPISettings = errors.New(
+		"configure organization, workspace and template UUIDs and a bearer token",
+	)
+	errMissingJob      = errors.New("job API did not return a job")
+	errUnexpectedJob   = errors.New("job API returned a job outside the requested submission")
+	errWorkspacePolicy = errors.New("workspace branch or deployment template does not match")
+	errWorkspaceSource = errors.New("workspace must use the trusted Configs HTTPS repository")
+)
