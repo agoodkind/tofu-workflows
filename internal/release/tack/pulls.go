@@ -28,6 +28,8 @@ var (
 	)
 )
 
+const releasePROpen = "open"
+
 func (p publisher) isReleasePR(pullRequest *github.PullRequest) bool {
 	source, found := strings.CutPrefix(pullRequest.GetHead().GetRef(), releaseBranchPrefix)
 
@@ -70,7 +72,7 @@ func (p publisher) releasePR(ctx context.Context, source string) (*github.PullRe
 func (p publisher) openReleases(ctx context.Context) iter.Seq2[*github.PullRequest, error] {
 	return func(yield func(*github.PullRequest, error) bool) {
 		options := &github.PullRequestListOptions{
-			State: "open",
+			State: releasePROpen,
 			Base:  mainBranch,
 		}
 
@@ -99,6 +101,7 @@ func (p publisher) retainRelease(
 	branch string,
 	manifest release.Manifest,
 	pullRequest *github.PullRequest,
+	expectedHead string,
 ) (*github.PullRequest, error) {
 	if pullRequest == nil {
 		created, err := p.openRelease(ctx, branch, manifest)
@@ -109,7 +112,7 @@ func (p publisher) retainRelease(
 		pullRequest = created
 	}
 
-	if pullRequest.GetState() != "open" {
+	if pullRequest.GetState() != releasePROpen {
 		return pullRequest, nil
 	}
 
@@ -130,7 +133,7 @@ func (p publisher) retainRelease(
 		return nil, p.closeRelease(ctx, pullRequest)
 	}
 
-	if err := p.readyAutoMerge(ctx, pullRequest); err != nil {
+	if err := p.readyAutoMerge(ctx, pullRequest, expectedHead); err != nil {
 		return nil, err
 	}
 

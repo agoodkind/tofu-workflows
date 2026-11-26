@@ -232,7 +232,7 @@ func (p publisher) publishEligible(
 		}
 
 		if parent == base {
-			return p.retainRelease(ctx, branch, manifest, existing)
+			return p.retainRelease(ctx, branch, manifest, existing, expected)
 		}
 	}
 
@@ -241,11 +241,12 @@ func (p publisher) publishEligible(
 		return nil, err
 	}
 
-	if err := p.prepareBranch(ctx, base, branch, expected, updated, manifest); err != nil {
+	commit, err := p.prepareBranch(ctx, base, branch, expected, updated, manifest)
+	if err != nil {
 		return nil, err
 	}
 
-	return p.retainRelease(ctx, branch, manifest, existing)
+	return p.retainRelease(ctx, branch, manifest, existing, commit)
 }
 
 func (p publisher) storedRelease(
@@ -327,7 +328,7 @@ func (p publisher) prepareBranch(
 	expected string,
 	files map[string]string,
 	manifest release.Manifest,
-) error {
+) (string, error) {
 	candidate := "automation/tack-release-staging/" + strings.ToLower(rand.Text())
 	_, _, err := p.target.Git.CreateRef(
 		ctx,
@@ -341,10 +342,10 @@ func (p publisher) prepareBranch(
 	if err != nil {
 		slog.Error("Create temporary Configs release branch failed", "err", err)
 
-		return fmt.Errorf("create temporary Configs release branch: %w", err)
+		return "", fmt.Errorf("create temporary Configs release branch: %w", err)
 	}
 
-	updateErr := p.finishBranch(ctx, base, branch, expected, candidate, files, manifest)
+	commit, updateErr := p.finishBranch(ctx, base, branch, expected, candidate, files, manifest)
 	_, cleanupErr := p.target.Git.DeleteRef(
 		context.WithoutCancel(ctx),
 		repoOwner,
@@ -354,13 +355,13 @@ func (p publisher) prepareBranch(
 	if cleanupErr != nil {
 		slog.Error("Delete temporary Configs release branch failed", "err", cleanupErr)
 
-		return errors.Join(
+		return "", errors.Join(
 			updateErr,
 			fmt.Errorf("delete temporary Configs release branch: %w", cleanupErr),
 		)
 	}
 
-	return updateErr
+	return commit, updateErr
 }
 
 func (p publisher) finishBranch(
@@ -371,29 +372,33 @@ func (p publisher) finishBranch(
 	candidate string,
 	files map[string]string,
 	manifest release.Manifest,
-) error {
+) (string, error) {
 	commit, err := p.signedCommit(ctx, candidate, base, files, manifest)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	latest, err := p.branchSHA(ctx, mainBranch)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if latest != base {
-		return errConfigsMainChangedWhilePreparing
+		return "", errConfigsMainChangedWhilePreparing
 	}
 
 	newer, err := newerSuccessfulTackBuild(ctx, p.source, manifest.SourceSHA)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if newer {
-		return errNewerSuccessfulTackReleaseSuperseded
+		return "", errNewerSuccessfulTackReleaseSuperseded
 	}
 
-	return p.updateBranch(ctx, candidate, commit, branch, expected)
+	if err := p.updateBranch(ctx, candidate, commit, branch, expected); err != nil {
+		return "", err
+	}
+
+	return commit, nil
 }

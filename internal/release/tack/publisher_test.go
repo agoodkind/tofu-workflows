@@ -68,6 +68,8 @@ func TestPublishTackCreatesAndReconcilesOneReadyPR(t *testing.T) {
 		t.Fatalf("Redelivery wrote another PR or signed commit or accepted the wrong reporter")
 	}
 
+	previousHead := release.prHead
+	release.listAutoMerge = true
 	release.advanceBase(t)
 	release.boundReporter = reporterID
 	release.publish(t, nil)
@@ -78,6 +80,10 @@ func TestPublishTackCreatesAndReconcilesOneReadyPR(t *testing.T) {
 			release.signedCommits,
 			release.autoMerges,
 		)
+	}
+
+	if release.prHead == previousHead {
+		t.Fatal("Reconciliation did not refresh the Configs commit")
 	}
 
 	parent := release.git(t, "rev-parse", "refs/heads/"+releaseBranchPrefix+newTackCommit+"^")
@@ -203,6 +209,7 @@ type releaseFixture struct {
 	signedCommits  int
 	opens          int
 	autoMerges     int
+	listAutoMerge  bool
 	boundReporter  int
 	allowAuto      bool
 	newerSucceeded bool
@@ -419,7 +426,7 @@ func (fixture *releaseFixture) handle(t *testing.T, writer http.ResponseWriter, 
 			writer,
 			strings.TrimPrefix(path, "/repos/agoodkind/configs/commits/"),
 		)
-	case path == "/repos/agoodkind/configs/pulls":
+	case path == "/repos/agoodkind/configs/pulls" || path == "/repos/agoodkind/configs/pulls/27":
 		fixture.pullResponse(t, writer, r)
 	case path == "/repos/agoodkind/configs":
 		encodeResponse(t, writer, map[string]bool{"allow_auto_merge": fixture.allowAuto})
@@ -546,10 +553,14 @@ func (fixture *releaseFixture) pullResponse(
 		},
 		"base": map[string]string{"ref": "main"},
 	}
-	if r.Method == http.MethodPost {
+	if r.Method == http.MethodPost || strings.HasSuffix(r.URL.Path, "/pulls/27") {
 		encodeResponse(t, writer, pull)
 
 		return
+	}
+
+	if fixture.listAutoMerge {
+		pull["auto_merge"] = map[string]string{"merge_method": "merge"}
 	}
 
 	encodeResponse(t, writer, []map[string]any{pull})
@@ -586,6 +597,19 @@ func (fixture *releaseFixture) graphQLResponse(
 	}
 
 	if strings.Contains(request.Query, "enablePullRequestAutoMerge") {
+		var input map[string]string
+		if err := json.Unmarshal(request.Variables.Input, &input); err != nil {
+			t.Fatal(err)
+		}
+
+		if input["expectedHeadOid"] != fixture.prHead {
+			t.Fatalf(
+				"Auto-merge used head %q, expected %q",
+				input["expectedHeadOid"],
+				fixture.prHead,
+			)
+		}
+
 		fixture.autoMerges++
 		encodeResponse(t, writer, map[string]any{"data": map[string]any{}})
 

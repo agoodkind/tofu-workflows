@@ -403,7 +403,11 @@ func pushReleaseRef(
 	return nil
 }
 
-func (p publisher) readyAutoMerge(ctx context.Context, pullRequest *github.PullRequest) error {
+func (p publisher) readyAutoMerge(
+	ctx context.Context,
+	pullRequest *github.PullRequest,
+	expectedHead string,
+) error {
 	repository, _, err := p.target.Repositories.Get(ctx, repoOwner, configsRepo)
 	if err != nil {
 		slog.Error("Read Configs auto-merge setting failed", "err", err)
@@ -451,7 +455,7 @@ func (p publisher) readyAutoMerge(ctx context.Context, pullRequest *github.PullR
 
 		for _, check := range rule.Parameters.Required {
 			if check.Context == terrakubePlanContext && check.IntegrationID == p.reporterAppID {
-				return p.enableAutoMerge(ctx, pullRequest)
+				return p.enableAutoMerge(ctx, pullRequest, expectedHead)
 			}
 		}
 	}
@@ -465,14 +469,45 @@ func (p publisher) readyAutoMerge(ctx context.Context, pullRequest *github.PullR
 	return nil
 }
 
-func (p publisher) enableAutoMerge(ctx context.Context, pullRequest *github.PullRequest) error {
-	if pullRequest.AutoMerge != nil || pullRequest.GetMerged() {
+func (p publisher) enableAutoMerge(
+	ctx context.Context,
+	previous *github.PullRequest,
+	expectedHead string,
+) error {
+	pullRequest, _, err := p.target.PullRequests.Get(
+		ctx,
+		repoOwner,
+		configsRepo,
+		previous.GetNumber(),
+	)
+	if err != nil {
+		slog.Error("Refresh Configs release PR failed", "err", err)
+
+		return fmt.Errorf("refresh Configs release PR: %w", err)
+	}
+
+	if !p.isReleasePR(pullRequest) || pullRequest.GetNodeID() != previous.GetNodeID() ||
+		pullRequest.GetHead().GetRef() != previous.GetHead().GetRef() {
+		return errGitHubDidNotAttributeConfigs
+	}
+
+	if pullRequest.GetHead().GetSHA() != expectedHead {
+		return errReleasePRHeadChangedDuring
+	}
+
+	if pullRequest.AutoMerge != nil || pullRequest.GetState() != releasePROpen ||
+		pullRequest.GetMerged() {
 		return nil
 	}
 
+	if pullRequest.GetDraft() {
+		return errExistingConfigsReleasePRBe
+	}
+
 	payload, err := json.Marshal(map[string]string{
-		"pullRequestId": pullRequest.GetNodeID(),
-		"mergeMethod":   "MERGE",
+		"pullRequestId":   pullRequest.GetNodeID(),
+		"mergeMethod":     "MERGE",
+		"expectedHeadOid": expectedHead,
 	})
 	if err != nil {
 		slog.Error("Encode GitHub auto-merge request failed", "err", err)

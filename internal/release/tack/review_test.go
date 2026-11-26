@@ -15,34 +15,92 @@ import (
 )
 
 func TestAutoMergeFailureNeverCallsMergeEndpoint(t *testing.T) {
+	pull := reviewReleasePR()
 	requests := 0
 	client := testGitHubClient(
 		t,
 		func(response http.ResponseWriter, request *http.Request) {
 			requests++
-			if request.Method != http.MethodPost || request.URL.Path != "/graphql" {
-				t.Errorf("Auto-merge failure sent %s %s", request.Method, request.URL.Path)
+			switch {
+			case request.Method == http.MethodGet && request.URL.Path == "/repos/agoodkind/configs/pulls/7":
+				encodeResponse(t, response, pull)
+			case request.Method == http.MethodPost && request.URL.Path == "/graphql":
+				encodeResponse(
+					t,
+					response,
+					map[string]any{
+						"errors": []map[string]string{
+							{"message": "Pull request is in clean status"},
+						},
+					},
+				)
+			default:
+				t.Fatalf("Auto-merge failure sent %s %s", request.Method, request.URL.Path)
 			}
-
-			encodeResponse(
-				t,
-				response,
-				map[string]any{
-					"errors": []map[string]string{{"message": "Pull request is in clean status"}},
-				},
-			)
 		},
 	)
-	publisher := publisher{target: client}
-	err := publisher.enableAutoMerge(
-		t.Context(),
-		&github.PullRequest{
-			Number: new(7),
-			NodeID: new("test-node"),
-		},
-	)
-	if !errors.Is(err, errGitHubGraphQL) || requests != 1 {
+	publisher := publisher{target: client, bot: publisherBot(mockApp)}
+	err := publisher.enableAutoMerge(t.Context(), pull, newTackCommit)
+	if !errors.Is(err, errGitHubGraphQL) || requests != 2 {
 		t.Fatalf("Auto-merge returned %v after %d requests", err, requests)
+	}
+}
+
+func TestAutoMergeRejectsHeadChangedAfterRefresh(t *testing.T) {
+	pull := reviewReleasePR()
+	head := newTackCommit
+	enabled := false
+	client := testGitHubClient(
+		t,
+		func(response http.ResponseWriter, request *http.Request) {
+			switch {
+			case request.Method == http.MethodGet && request.URL.Path == "/repos/agoodkind/configs/pulls/7":
+				encodeResponse(t, response, pull)
+				head = laterTackCommit
+			case request.Method == http.MethodPost && request.URL.Path == "/graphql":
+				var mutation struct {
+					Variables struct{ Input map[string]string }
+				}
+				decodeRequest(t, request, &mutation)
+				expected := mutation.Variables.Input["expectedHeadOid"]
+				if expected != "" && expected != head {
+					encodeResponse(
+						t,
+						response,
+						map[string]any{
+							"errors": []map[string]string{{"message": "Head SHA changed"}},
+						},
+					)
+
+					return
+				}
+
+				enabled = true
+				encodeResponse(t, response, map[string]any{"data": map[string]any{}})
+			default:
+				t.Fatalf("Head check sent %s %s", request.Method, request.URL.Path)
+			}
+		},
+	)
+	publisher := publisher{target: client, bot: publisherBot(mockApp)}
+	err := publisher.enableAutoMerge(t.Context(), pull, newTackCommit)
+	if !errors.Is(err, errGitHubGraphQL) || enabled {
+		t.Fatalf("Changed PR head returned err=%v and enabled=%v", err, enabled)
+	}
+}
+
+func reviewReleasePR() *github.PullRequest {
+	return &github.PullRequest{
+		Number: new(7),
+		NodeID: new("test-node"),
+		State:  new("open"),
+		User:   &github.User{Login: new(publisherBot(mockApp))},
+		Head: &github.PullRequestBranch{
+			Ref:  new(releaseBranchPrefix + newTackCommit),
+			SHA:  new(newTackCommit),
+			Repo: &github.Repository{FullName: new(repoOwner + "/" + configsRepo)},
+		},
+		Base: &github.PullRequestBranch{Ref: new(mainBranch)},
 	}
 }
 
@@ -175,7 +233,13 @@ func TestPublisherClosesCandidateSupersededDuringPRCreation(t *testing.T) {
 		reporterAppID: reporterID,
 	}
 	manifest := release.Manifest{SourceSHA: newTackCommit, BuildRunID: 24, BuildAttempt: 1}
-	pullRequest, err := publisher.retainRelease(t.Context(), oldBranch, manifest, nil)
+	pullRequest, err := publisher.retainRelease(
+		t.Context(),
+		oldBranch,
+		manifest,
+		nil,
+		newTackCommit,
+	)
 	if err != nil || pullRequest != nil || !closed {
 		t.Fatalf("Stale candidate returned %v, %v and closed=%v", pullRequest, err, closed)
 	}
