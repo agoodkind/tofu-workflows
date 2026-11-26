@@ -38,7 +38,7 @@ func Load(path string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("open release manifest: %w", err)
 	}
 
-	manifest, readErr := readManifest(file)
+	manifest, readErr := Decode(file)
 
 	return manifest, errors.Join(readErr, file.Close())
 }
@@ -83,7 +83,7 @@ func ReadArtifact(reader io.Reader, expectedRunID int64, expectedAttempt int) (M
 		return Manifest{}, fmt.Errorf("open release.json: %w", err)
 	}
 
-	manifest, readErr := readManifest(stream)
+	manifest, readErr := Decode(stream)
 	if err := errors.Join(readErr, stream.Close()); err != nil {
 		return Manifest{}, err
 	}
@@ -97,7 +97,12 @@ func ReadArtifact(reader io.Reader, expectedRunID int64, expectedAttempt int) (M
 	return manifest, nil
 }
 
-func readManifest(reader io.Reader) (Manifest, error) {
+// Decode reads and validates one bounded release manifest.
+//
+// The caller supplies the authenticated build identity separately.
+//
+// Use ReadArtifact for an Actions ZIP archive that includes build identity.
+func Decode(reader io.Reader) (Manifest, error) {
 	var manifest Manifest
 	data, err := io.ReadAll(io.LimitReader(reader, maxManifestBytes+1))
 	if err != nil {
