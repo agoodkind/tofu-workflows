@@ -5,25 +5,11 @@ inputs:
     description: Configs App installation token with Contents and Pull requests write access.
     required: true
   publisher-slug:
-    description: Configs release publisher App slug.
+    description: Configs release publisher App slug from the token creation step.
     required: true
   reporter-app-id:
     description: Numeric GitHub App ID required to report Terrakube plan.
     required: true
-  artifact:
-    description: Path to the release artifact ZIP. Omit to reconcile open release pull requests.
-    required: false
-  build-run:
-    description: GitHub Actions run ID for a supplied artifact.
-    required: false
-    default: '0'
-  build-attempt:
-    description: GitHub Actions run attempt for a supplied artifact.
-    required: false
-    default: '0'
-  source-token:
-    description: Tack Actions read token for a supplied artifact.
-    required: false
 runs:
   using: composite
   steps:
@@ -35,13 +21,8 @@ runs:
       shell: bash
       env:
         CONFIGS_PUBLISHER_TOKEN: ${{ inputs.publisher-token }}
-        TACK_BUILD_READ_TOKEN: ${{ inputs.source-token }}
         PUBLISHER_SLUG: ${{ inputs.publisher-slug }}
         REPORTER_APP_ID: ${{ inputs.reporter-app-id }}
-        RELEASE_ARTIFACT: ${{ inputs.artifact }}
-        BUILD_RUN: ${{ inputs.build-run }}
-        BUILD_ATTEMPT: ${{ inputs.build-attempt }}
       run: |
         go -C "${GITHUB_ACTION_PATH}/../../.." run ./cmd/tack-release \
-          --publisher-slug "${PUBLISHER_SLUG}" --reporter-app-id "${REPORTER_APP_ID}" \
-          --artifact "${RELEASE_ARTIFACT}" --build-run "${BUILD_RUN}" --build-attempt "${BUILD_ATTEMPT}"
+          --publisher-slug "${PUBLISHER_SLUG}" --reporter-app-id "${REPORTER_APP_ID}"

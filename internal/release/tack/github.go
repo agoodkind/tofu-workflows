@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/google/go-github/v93/github"
@@ -33,15 +34,10 @@ var (
 	errGitHubDidNotVerifyConfigs = errors.New(
 		"GitHub did not verify the Configs pin commit",
 	)
-	errMergeableReleasePRHeadDoes = errors.New(
-		"the mergeable release PR head does not match its signed release evidence",
-	)
-	errGitHubDidNotMergeConfigs = errors.New(
-		"GitHub did not merge the Configs release PR",
-	)
 )
 
 const (
+	githubWebCommitter   = "web-flow"
 	quietGit             = "--quiet"
 	releaseBranchPrefix  = "automation/tack-release/"
 	commitManifestPrefix = "Tack release evidence: "
@@ -119,12 +115,59 @@ func (p publisher) trustedCommit(
 
 	if commit.GetSHA() != sha ||
 		commit.GetAuthor().GetLogin() != p.bot ||
+		commit.GetCommitter().GetLogin() != githubWebCommitter ||
 		!commit.GetCommit().GetVerification().GetVerified() ||
 		len(commit.Parents) != 1 {
 		return nil, errConfigsReleaseBranchRequiresVerified
 	}
 
+	verified, err := p.verifyGitHubSignature(ctx, sha)
+	if err != nil {
+		return nil, err
+	}
+
+	if !verified {
+		return nil, errConfigsReleaseBranchRequiresVerified
+	}
+
 	return commit, nil
+}
+
+func (p publisher) verifyGitHubSignature(ctx context.Context, sha string) (bool, error) {
+	data, err := p.graphQL(
+		ctx,
+		`query($expression: String!) {
+		repository(owner: "agoodkind", name: "configs") {
+			object(expression: $expression) {
+				... on Commit { signature { isValid ... on GpgSignature { wasSignedByGitHub } } }
+			}
+		}
+	}`,
+		map[string]json.RawMessage{"expression": json.RawMessage(strconv.Quote(sha))},
+	)
+	if err != nil {
+		return false, err
+	}
+
+	var response struct {
+		Repository struct {
+			Object struct {
+				Signature struct {
+					IsValid           bool `json:"isValid"`
+					WasSignedByGitHub bool `json:"wasSignedByGitHub"`
+				} `json:"signature"`
+			} `json:"object"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		slog.Error("Decode GitHub signature failed", "err", err)
+
+		return false, fmt.Errorf("decode GitHub signature: %w", err)
+	}
+
+	signature := response.Repository.Object.Signature
+
+	return signature.IsValid && signature.WasSignedByGitHub, nil
 }
 
 func marshalCommitEvidence(manifest release.Manifest) (string, error) {
@@ -223,7 +266,7 @@ func (p publisher) signedCommit(
 		`mutation($input: CreateCommitOnBranchInput!) {
 		createCommitOnBranch(input: $input) { commit { oid signature { isValid } } }
 	}`,
-		payload,
+		map[string]json.RawMessage{"input": payload},
 	)
 	if err != nil {
 		return "", fmt.Errorf("create signed Configs pin commit: %w", err)
@@ -251,7 +294,7 @@ type graphQLRequest struct {
 func (p publisher) graphQL(
 	ctx context.Context,
 	query string,
-	inputValue json.RawMessage,
+	variables map[string]json.RawMessage,
 ) (json.RawMessage, error) {
 	request, err := p.target.NewRequest(
 		ctx,
@@ -259,7 +302,7 @@ func (p publisher) graphQL(
 		"graphql",
 		graphQLRequest{
 			Query:     query,
-			Variables: map[string]json.RawMessage{"input": inputValue},
+			Variables: variables,
 		},
 	)
 	if err != nil {
@@ -423,6 +466,10 @@ func (p publisher) readyAutoMerge(ctx context.Context, pullRequest *github.PullR
 }
 
 func (p publisher) enableAutoMerge(ctx context.Context, pullRequest *github.PullRequest) error {
+	if pullRequest.AutoMerge != nil || pullRequest.GetMerged() {
+		return nil
+	}
+
 	payload, err := json.Marshal(map[string]string{
 		"pullRequestId": pullRequest.GetNodeID(),
 		"mergeMethod":   "MERGE",
@@ -438,85 +485,13 @@ func (p publisher) enableAutoMerge(ctx context.Context, pullRequest *github.Pull
 		`mutation($input: EnablePullRequestAutoMergeInput!) {
 		enablePullRequestAutoMerge(input: $input) { pullRequest { id } }
 	}`,
-		payload,
+		map[string]json.RawMessage{"input": payload},
 	)
 	if err == nil {
 		return nil
 	}
 
-	current, _, refreshErr := p.target.PullRequests.Get(
-		ctx,
-		repoOwner,
-		configsRepo,
-		pullRequest.GetNumber(),
-	)
-	if refreshErr != nil {
-		return fmt.Errorf("enable Configs auto-merge: %w", errors.Join(err, refreshErr))
-	}
-
-	if current.AutoMerge != nil || current.GetMerged() {
-		return nil
-	}
-
-	if current.GetMergeableState() == "clean" {
-		return p.mergeReadyRelease(ctx, current)
-	}
-
 	slog.Error("Enable Configs auto-merge failed", "err", err)
 
 	return fmt.Errorf("enable Configs auto-merge: %w", err)
-}
-
-func (p publisher) mergeReadyRelease(ctx context.Context, pullRequest *github.PullRequest) error {
-	sha := pullRequest.GetHead().GetSHA()
-	commit, err := p.trustedCommit(ctx, sha)
-	if err != nil {
-		return err
-	}
-
-	manifest, err := manifestFromCommit(commit)
-	if err != nil {
-		return err
-	}
-
-	if pullRequest.GetHead().GetRef() != releaseBranchPrefix+manifest.SourceSHA {
-		return errMergeableReleasePRHeadDoes
-	}
-
-	_, _, current, err := p.configsBase(ctx)
-	if err != nil {
-		return err
-	}
-
-	fresh, err := p.eligible(ctx, current, manifest.SourceSHA)
-	if err != nil {
-		return err
-	}
-
-	if !fresh {
-		return p.closeRelease(ctx, pullRequest)
-	}
-
-	result, _, err := p.target.PullRequests.Merge(
-		ctx,
-		repoOwner,
-		configsRepo,
-		pullRequest.GetNumber(),
-		"",
-		&github.PullRequestOptions{
-			SHA:         sha,
-			MergeMethod: "merge",
-		},
-	)
-	if err != nil {
-		slog.Error("Merge Configs release after the required checks failed", "err", err)
-
-		return fmt.Errorf("merge Configs release after the required checks: %w", err)
-	}
-
-	if !result.GetMerged() {
-		return errGitHubDidNotMergeConfigs
-	}
-
-	return nil
 }

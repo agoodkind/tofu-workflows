@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -20,18 +21,19 @@ import (
 )
 
 const (
-	oldTackCommit   = "1111111111111111111111111111111111111111"
-	newTackCommit   = "2222222222222222222222222222222222222222"
-	laterTackCommit = "3333333333333333333333333333333333333333"
-	mockApp         = "release-app"
-	reporterID      = 783
+	oldTackCommit     = "1111111111111111111111111111111111111111"
+	newTackCommit     = "2222222222222222222222222222222222222222"
+	laterTackCommit   = "3333333333333333333333333333333333333333"
+	mockApp           = "release-app"
+	reporterID        = 783
+	fixtureArtifactID = 432
 )
 
 func TestPublishTackCreatesAndReconcilesOneReadyPR(t *testing.T) {
 	release := newReleaseFixture(t)
 	artifact := releaseArtifact(t, newTackCommit)
 
-	urls := release.publish(t, bytes.NewReader(artifact))
+	urls := release.publish(t, artifact)
 	if len(urls) != 1 || urls[0] != "https://github.com/agoodkind/configs/pull/27" {
 		t.Fatalf("PublishTack returned %v", urls)
 	}
@@ -61,7 +63,7 @@ func TestPublishTackCreatesAndReconcilesOneReadyPR(t *testing.T) {
 
 	release.allowAuto = true
 	release.boundReporter = reporterID + 1
-	release.publish(t, bytes.NewReader(artifact))
+	release.publish(t, artifact)
 	if release.opens != 1 || release.signedCommits != 1 || release.autoMerges != 0 {
 		t.Fatalf("Redelivery wrote another PR or signed commit or accepted the wrong reporter")
 	}
@@ -87,9 +89,7 @@ func TestPublishTackCreatesAndReconcilesOneReadyPR(t *testing.T) {
 func TestPublishTackRejectsSupersededBuilds(t *testing.T) {
 	release := newReleaseFixture(t)
 	release.newerSucceeded = true
-	if urls := release.publish(t, bytes.NewReader(releaseArtifact(t, newTackCommit))); len(
-		urls,
-	) != 0 {
+	if urls := release.publish(t, releaseArtifact(t, newTackCommit)); len(urls) != 0 {
 		t.Fatalf("Superseded Tack release returned %v", urls)
 	}
 
@@ -105,28 +105,24 @@ func TestPublishTackRejectsSupersededBuilds(t *testing.T) {
 func TestPublishTackKeepsReleaseWhenNewerBuildFailed(t *testing.T) {
 	release := newReleaseFixture(t)
 	release.newerFailed = true
-	if urls := release.publish(t, bytes.NewReader(releaseArtifact(t, newTackCommit))); len(
-		urls,
-	) != 1 {
+	if urls := release.publish(t, releaseArtifact(t, newTackCommit)); len(urls) != 1 {
 		t.Fatalf("Eligible release returned %v after a newer failed build", urls)
 	}
 }
 
 func TestPublishTackVerifiesTheBuildAttemptAndSource(t *testing.T) {
 	release := newReleaseFixture(t)
-	_, err := PublishTack(
+	_, err := publishTack(
 		t.Context(),
 		release.client,
 		release.client,
 		"synthetic-token",
 		mockApp,
 		reporterID,
-		bytes.NewReader(releaseArtifact(t, laterTackCommit)),
-		24,
-		1,
+		fixtureDispatch(releaseArtifact(t, laterTackCommit)),
 	)
 	if err == nil ||
-		!strings.Contains(err.Error(), "does not match a successful Tack main push build") {
+		!strings.Contains(err.Error(), "does not match the Tack build artifact") {
 		t.Fatalf("Unexpected source revision produced error %v", err)
 	}
 
@@ -211,12 +207,17 @@ type releaseFixture struct {
 	allowAuto      bool
 	newerSucceeded bool
 	newerFailed    bool
+	archive        []byte
 }
 
 func newReleaseFixture(t *testing.T) *releaseFixture {
 	t.Helper()
 
-	fixture := &releaseFixture{directory: t.TempDir(), commitMessages: make(map[string]string)}
+	fixture := &releaseFixture{
+		directory:      t.TempDir(),
+		commitMessages: make(map[string]string),
+		archive:        releaseArtifact(t, newTackCommit),
+	}
 	fixture.git(t, "init", "--bare", "--quiet")
 	fixture.git(t, "config", "user.name", "Test Author")
 	fixture.git(t, "config", "user.email", "fixture@example.com")
@@ -234,56 +235,62 @@ func newReleaseFixture(t *testing.T) *releaseFixture {
 	t.Setenv("GIT_CONFIG_GLOBAL", configFile)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 
-	server := httptest.NewServer(
-		http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	fixture.client = testGitHubClient(
+		t,
+		func(writer http.ResponseWriter, request *http.Request) {
 			fixture.handle(t, writer, request)
-		}),
+		},
 	)
-	t.Cleanup(server.Close)
+
+	return fixture
+}
+
+func fixtureDispatch(archive []byte) *releaseDispatch {
+	if archive == nil {
+		return nil
+	}
+
+	return &releaseDispatch{Archive: archive, ArtifactID: fixtureArtifactID, RunID: 24, Attempt: 1}
+}
+
+type githubResponseFunc func(*http.Request) *http.Response
+
+func (respond githubResponseFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return respond(request), nil
+}
+
+func testGitHubClient(t *testing.T, handle http.HandlerFunc) *github.Client {
+	t.Helper()
 	client, err := github.NewClient(
-		github.WithHTTPClient(server.Client()),
-		github.WithEnterpriseURLs(server.URL+"/api/v3/", server.URL+"/api/uploads/"),
+		github.WithHTTPClient(&http.Client{
+			Transport: githubResponseFunc(func(request *http.Request) *http.Response {
+				recorder := httptest.NewRecorder()
+				handle(recorder, request)
+				response := recorder.Result()
+				response.Request = request
+
+				return response
+			}),
+		}),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	fixture.client = client
-
-	return fixture
+	return client
 }
 
-func (fixture *releaseFixture) publish(t *testing.T, artifact *bytes.Reader) []string {
+func (fixture *releaseFixture) publish(t *testing.T, archive []byte) []string {
 	t.Helper()
-
-	var urls []string
-	var err error
-	if artifact == nil {
-		urls, err = PublishTack(
-			t.Context(),
-			fixture.client,
-			fixture.client,
-			"synthetic-token",
-			mockApp,
-			reporterID,
-			nil,
-			0,
-			0,
-		)
-	} else {
-		urls, err = PublishTack(
-			t.Context(),
-			fixture.client,
-			fixture.client,
-			"synthetic-token",
-			mockApp,
-			reporterID,
-			artifact,
-			24,
-			1,
-		)
-	}
-
+	urls, err := publishTack(
+		t.Context(),
+		fixture.client,
+		fixture.client,
+		"synthetic-token",
+		mockApp,
+		reporterID,
+		fixtureDispatch(archive),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,6 +335,25 @@ func (fixture *releaseFixture) handle(t *testing.T, writer http.ResponseWriter, 
 
 	path := strings.TrimPrefix(r.URL.Path, "/api/v3")
 	switch {
+	case path == "/apps/"+mockApp:
+		encodeResponse(t, writer, map[string]any{"slug": mockApp, "id": reporterID + 20})
+	case path == "/repos/agoodkind/tack/actions/artifacts/432":
+		encodeResponse(
+			t,
+			writer,
+			map[string]any{
+				"id":      fixtureArtifactID,
+				"name":    "tack-release-1",
+				"expired": false,
+				"digest":  fmt.Sprintf("sha256:%x", sha256.Sum256(fixture.archive)),
+				"workflow_run": map[string]any{
+					"id":                 24,
+					"head_sha":           newTackCommit,
+					"repository_id":      tackRepositoryID,
+					"head_repository_id": tackRepositoryID,
+				},
+			},
+		)
 	case path == "/repos/agoodkind/tack/actions/runs/24/attempts/1":
 		encodeResponse(t, writer, successfulRun(newTackCommit))
 	case strings.HasPrefix(path, "/repos/agoodkind/tack/compare/"):
@@ -469,8 +495,9 @@ func (fixture *releaseFixture) commitResponse(
 		t,
 		writer,
 		map[string]any{
-			"sha":    sha,
-			"author": map[string]string{"login": mockApp + "[bot]"},
+			"sha":       sha,
+			"author":    map[string]string{"login": mockApp + "[bot]"},
+			"committer": map[string]string{"login": githubWebCommitter},
 			"commit": map[string]any{
 				"message":      fixture.commitMessages[sha],
 				"verification": map[string]bool{"verified": true},
@@ -540,6 +567,24 @@ func (fixture *releaseFixture) graphQLResponse(
 		Variables struct{ Input json.RawMessage }
 	}
 	decodeRequest(t, r, &request)
+	if strings.Contains(request.Query, "wasSignedByGitHub") {
+		encodeResponse(
+			t,
+			writer,
+			map[string]any{
+				"data": map[string]any{
+					"repository": map[string]any{
+						"object": map[string]any{
+							"signature": map[string]any{"isValid": true, "wasSignedByGitHub": true},
+						},
+					},
+				},
+			},
+		)
+
+		return
+	}
+
 	if strings.Contains(request.Query, "enablePullRequestAutoMerge") {
 		fixture.autoMerges++
 		encodeResponse(t, writer, map[string]any{"data": map[string]any{}})

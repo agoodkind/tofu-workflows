@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 
@@ -15,6 +14,12 @@ import (
 )
 
 var (
+	errPublisherApp = errors.New(
+		"GitHub did not identify the configured publisher App",
+	)
+	errReporterApp = errors.New(
+		"the Configs publisher and Terrakube reporter must use different GitHub Apps",
+	)
 	errConfigsPublisherTokenAppSlug = errors.New(
 		"the Configs publisher token, App slug, and Terrakube reporter App ID are required",
 	)
@@ -42,45 +47,41 @@ var (
 	)
 )
 
-// PublishTack opens or refreshes a ready Configs PR from a verified Tack build.
-//
-// The publisher validates artifacts against the Tack build history and
-// reconciles open release PRs when the caller omits the artifact.
-//
-// To reconcile open release PRs after a Configs main push, omit the artifact.
-//
-//	urls, err := PublishTack(ctx, source, target, token, slug, appID, nil, 0, 0)
-func PublishTack(
+func publisherBot(slug string) string {
+	return slug + "[bot]"
+}
+
+func publishTack(
 	ctx context.Context,
 	source *github.Client,
 	target *github.Client,
 	token string,
 	slug string,
 	reporterID int64,
-	artifact io.Reader,
-	runID int64,
-	attempt int,
+	dispatch *releaseDispatch,
 ) ([]string, error) {
 	if token == "" || !gitHubAppSlug.MatchString(slug) || reporterID <= 0 {
 		return nil, errConfigsPublisherTokenAppSlug
+	}
+
+	if err := verifyPublisherApp(ctx, target, slug, reporterID); err != nil {
+		return nil, err
 	}
 
 	releasePublisher := publisher{
 		source:        source,
 		target:        target,
 		token:         token,
-		bot:           slug + "[bot]",
+		bot:           publisherBot(slug),
 		reporterAppID: reporterID,
 	}
-	if artifact == nil {
+	if dispatch == nil {
 		return releasePublisher.reconcile(ctx)
 	}
 
-	manifest, err := release.ReadArtifact(artifact, runID, attempt)
+	manifest, err := verifyDispatch(ctx, source, dispatch)
 	if err != nil {
-		slog.Error("Read Tack build artifact failed", "err", err)
-
-		return nil, fmt.Errorf("read Tack build artifact: %w", err)
+		return nil, err
 	}
 
 	existing, err := releasePublisher.releasePR(ctx, manifest.SourceSHA)
@@ -94,6 +95,30 @@ func PublishTack(
 	}
 
 	return []string{url}, nil
+}
+
+func verifyPublisherApp(
+	ctx context.Context,
+	client *github.Client,
+	slug string,
+	reporterID int64,
+) error {
+	app, _, err := client.Apps.Get(ctx, slug)
+	if err != nil {
+		slog.Error("Read Configs publisher App failed", "err", err)
+
+		return fmt.Errorf("read Configs publisher App: %w", err)
+	}
+
+	if app.GetID() <= 0 || app.GetSlug() != slug {
+		return errPublisherApp
+	}
+
+	if app.GetID() == reporterID {
+		return errReporterApp
+	}
+
+	return nil
 }
 
 func (p publisher) reconcile(ctx context.Context) ([]string, error) {

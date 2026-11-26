@@ -121,11 +121,29 @@ func (p publisher) retainRelease(
 		return nil, err
 	}
 
+	fresh, err := p.stillEligible(ctx, manifest.SourceSHA)
+	if err != nil {
+		return nil, err
+	}
+
+	if !fresh {
+		return nil, p.closeRelease(ctx, pullRequest)
+	}
+
 	if err := p.readyAutoMerge(ctx, pullRequest); err != nil {
 		return nil, err
 	}
 
 	return pullRequest, nil
+}
+
+func (p publisher) stillEligible(ctx context.Context, source string) (bool, error) {
+	_, _, current, err := p.configsBase(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	return p.eligible(ctx, current, source)
 }
 
 func (p publisher) openRelease(

@@ -11,29 +11,33 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/google/go-github/v93/github"
-
 	"github.com/agoodkind/tofu-workflows/internal/githubapi"
+	"github.com/google/go-github/v93/github"
 )
 
 var (
-	errPositionalArguments  = errors.New("tack-release does not accept positional arguments")
-	errMissingBuildIdentity = errors.New(
-		"--artifact requires a positive --build-run and --build-attempt",
-	)
-	errMissingArtifact = errors.New("build metadata requires --artifact")
+	errPublisherEventPath  = errors.New("set GITHUB_EVENT_PATH to the absolute event file path")
+	errPositionalArguments = errors.New("tack-release does not accept positional arguments")
+	errPublisherEvent      = errors.New("use a Configs main push or a Tack release dispatch")
 )
 
-const publicRequestTimeout = 30 * time.Second
+const (
+	publicRequestTimeout = 30 * time.Second
+	dispatchEvent        = "repository_dispatch"
+)
+
+type publishOptions struct {
+	slug       string
+	reporterID int64
+}
 
 // Run executes the Tack release publisher command.
 //
 // Run handles interruption and prints the Configs release PR URLs.
-//
-// The executable can pass the returned status to the operating system.
 //
 //	os.Exit(Run())
 func Run() int {
@@ -50,26 +54,10 @@ func Run() int {
 	return 0
 }
 
-type publishOptions struct {
-	artifact   string
-	runID      int64
-	attempt    int
-	slug       string
-	reporterID int64
-}
-
 func parsePublishOptions(args []string, stderr io.Writer) (publishOptions, error) {
 	var options publishOptions
 	flags := flag.NewFlagSet("tack-release", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.StringVar(
-		&options.artifact,
-		"artifact",
-		"",
-		"Path to the verified workflow artifact ZIP. Omit to reconcile pending pull requests.",
-	)
-	flags.Int64Var(&options.runID, "build-run", 0, "Tack workflow run ID.")
-	flags.IntVar(&options.attempt, "build-attempt", 0, "Tack workflow run attempt.")
 	flags.StringVar(
 		&options.slug,
 		"publisher-slug",
@@ -87,21 +75,13 @@ func parsePublishOptions(args []string, stderr io.Writer) (publishOptions, error
 			return options, flag.ErrHelp
 		}
 
-		slog.Error("Parse publish-tack arguments failed", "err", err)
+		slog.Error("Parse tack-release arguments failed", "err", err)
 
-		return options, fmt.Errorf("parse publish-tack arguments: %w", err)
+		return options, fmt.Errorf("parse tack-release arguments: %w", err)
 	}
 
 	if flags.NArg() != 0 {
 		return options, errPositionalArguments
-	}
-
-	if options.artifact != "" && (options.runID <= 0 || options.attempt <= 0) {
-		return options, errMissingBuildIdentity
-	}
-
-	if options.artifact == "" && (options.runID != 0 || options.attempt != 0) {
-		return options, errMissingArtifact
 	}
 
 	return options, nil
@@ -109,6 +89,11 @@ func parsePublishOptions(args []string, stderr io.Writer) (publishOptions, error
 
 func publishTackCommand(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	options, err := parsePublishOptions(args, stderr)
+	if err != nil {
+		return err
+	}
+
+	event, err := readPublisherEvent(options.slug)
 	if err != nil {
 		return err
 	}
@@ -121,45 +106,18 @@ func publishTackCommand(ctx context.Context, args []string, stdout, stderr io.Wr
 		return fmt.Errorf("initialize Configs GitHub client: %w", err)
 	}
 
-	source, err := tackSourceClient(options.artifact)
+	source, err := github.NewClient(
+		github.WithHTTPClient(&http.Client{Timeout: publicRequestTimeout}),
+	)
+	if err != nil {
+		slog.Error("Initialize public Tack client failed", "err", err)
+
+		return fmt.Errorf("initialize public Tack client: %w", err)
+	}
+
+	urls, err := publishTack(ctx, source, target, token, options.slug, options.reporterID, event)
 	if err != nil {
 		return err
-	}
-
-	var file *os.File
-	if options.artifact != "" {
-		file, err = os.Open(options.artifact)
-		if err != nil {
-			slog.Error("Open Tack release artifact failed", "err", err)
-
-			return fmt.Errorf("open Tack release artifact: %w", err)
-		}
-	}
-
-	var artifact io.Reader
-	if file != nil {
-		artifact = file
-	}
-
-	urls, err := PublishTack(
-		ctx,
-		source,
-		target,
-		token,
-		options.slug,
-		options.reporterID,
-		artifact,
-		options.runID,
-		options.attempt,
-	)
-	if file != nil {
-		err = errors.Join(err, file.Close())
-	}
-
-	if err != nil {
-		slog.Error("Publish Tack release failed", "err", err)
-
-		return fmt.Errorf("publish Tack release: %w", err)
 	}
 
 	for _, url := range urls {
@@ -173,26 +131,42 @@ func publishTackCommand(ctx context.Context, args []string, stdout, stderr io.Wr
 	return nil
 }
 
-func tackSourceClient(artifactPath string) (*github.Client, error) {
-	if artifactPath != "" {
-		client, err := githubapi.NewClient(os.Getenv("TACK_BUILD_READ_TOKEN"))
-		if err != nil {
-			slog.Error("Initialize Tack build client failed", "err", err)
-
-			return nil, fmt.Errorf("initialize Tack build client: %w", err)
-		}
-
-		return client, nil
+func readPublisherEvent(slug string) (*releaseDispatch, error) {
+	if os.Getenv("GITHUB_REPOSITORY") != repoOwner+"/"+configsRepo ||
+		os.Getenv("GITHUB_REF") != "refs/heads/"+mainBranch {
+		return nil, errPublisherEvent
 	}
 
-	client, err := github.NewClient(
-		github.WithHTTPClient(&http.Client{Timeout: publicRequestTimeout}),
-	)
+	switch os.Getenv("GITHUB_EVENT_NAME") {
+	case pushEvent:
+		return nil, nil
+	case dispatchEvent:
+		return readDispatchFile(os.Getenv("GITHUB_EVENT_PATH"), publisherBot(slug))
+	default:
+		return nil, errPublisherEvent
+	}
+}
+
+func readDispatchFile(path, bot string) (*releaseDispatch, error) {
+	if !filepath.IsAbs(path) {
+		return nil, errPublisherEventPath
+	}
+
+	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
-		slog.Error("Initialize public Tack read client failed", "err", err)
+		slog.Error("Open GitHub event directory failed", "err", err)
 
-		return nil, fmt.Errorf("initialize public Tack read client: %w", err)
+		return nil, fmt.Errorf("open GitHub event directory: %w", err)
 	}
 
-	return client, nil
+	event, err := root.Open(filepath.Base(path))
+	if err != nil {
+		slog.Error("Open GitHub event failed", "err", err)
+
+		return nil, errors.Join(fmt.Errorf("open GitHub event: %w", err), root.Close())
+	}
+
+	dispatch, decodeErr := decodeDispatch(event, bot)
+
+	return dispatch, errors.Join(decodeErr, event.Close(), root.Close())
 }
