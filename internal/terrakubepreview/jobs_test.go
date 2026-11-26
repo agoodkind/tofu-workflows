@@ -26,6 +26,13 @@ func TestPreviewCommit(t *testing.T) {
 		{"stale request", "completed", head, false, true, false},
 		{"failed", "failed", head, true, false, false},
 		{"unknown", "unknown", head, true, false, false},
+		{"skipped plan", "completed", head, true, false, false},
+		{"missing artifact", "completed", head, true, false, false},
+		{"duplicate after submission", "completed", head, false, false, false},
+		{"ambiguous response", "completed", head, false, false, false},
+		{"changed step job", "completed", head, true, false, false},
+		{"unexpected plan step", "completed", head, true, false, false},
+		{"missing step", "completed", head, true, false, false},
 	} {
 		t.Run(
 			tc.name,
@@ -38,6 +45,30 @@ func TestPreviewCommit(t *testing.T) {
 				item.Attributes.Marker = "marker"
 				item.Attributes.Template = "template"
 				item.Relationships.Workspace.Data = identity{Type: "workspace", ID: "workspace"}
+				item.Attributes.Plan = "private/plan.bin"
+				if tc.name == "missing artifact" {
+					item.Attributes.Plan = ""
+				}
+
+				var evidence step
+				evidence.Type = "step"
+				evidence.ID = "step"
+				evidence.Attributes.Number = planStepNumber
+				evidence.Attributes.Name = planStepName
+				evidence.Attributes.Status = completed
+				evidence.Relationships.Job.Data = identity{Type: "job", ID: item.ID}
+				if tc.name == "skipped plan" {
+					evidence.Attributes.Status = "notExecuted"
+				}
+
+				if tc.name == "changed step job" {
+					evidence.Relationships.Job.Data.ID = "another"
+				}
+
+				if tc.name == "unexpected plan step" {
+					evidence.Attributes.Name = "other"
+				}
+
 				posted := false
 				client := &http.Client{
 					Transport: exchange(func(r *http.Request) (*http.Response, error) {
@@ -45,10 +76,31 @@ func TestPreviewCommit(t *testing.T) {
 						switch r.Method {
 						case "GET":
 							data = []job{}
-							if tc.exists {
+							if tc.exists || posted {
 								data = []job{item}
 							}
+
+							if tc.name == "duplicate after submission" && posted {
+								data = []job{item, item}
+							}
+
+							if r.URL.Path == "/organization//job/1/step" {
+								data = []step{evidence}
+								if tc.name == "missing step" {
+									data = []step{}
+								}
+							}
 						case "POST":
+							if posted {
+								t.Fatal("retried a job submission")
+							}
+
+							if tc.name == "ambiguous response" {
+								posted = true
+
+								return nil, io.ErrUnexpectedEOF
+							}
+
 							posted = true
 							var request struct{ Data job }
 							if err := json.NewDecoder(r.Body).Decode(&request); err != nil {

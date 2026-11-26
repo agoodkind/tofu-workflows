@@ -29,10 +29,12 @@ var (
 	errURL           = errors.New("configure private HTTPS Terrakube URLs")
 	errConfiguration = errors.New("configure preview organization, template, and API token")
 	errWorkspace     = errors.New("configure distinct preview workspace IDs")
-	errSelection     = errors.New("invalid root selection result")
 )
 
-const requestTimeout = 30 * time.Second
+const (
+	requestTimeout = 30 * time.Second
+	previewTimeout = 40 * time.Minute
+)
 
 var revision = regexp.MustCompile("^[0-9a-f]{40}$")
 
@@ -46,6 +48,8 @@ func run(ctx context.Context) error {
 
 	reader, err := githubapi.NewClient(os.Getenv("GITHUB_TOKEN"))
 	if err != nil {
+		slog.Error("Could not create the pull request client", "err", err)
+
 		return fmt.Errorf("create pull request client: %w", err)
 	}
 
@@ -54,6 +58,20 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("create reporter client: %w", err)
 	}
 
+	return report(ctx, reader, reporter, number, base, sha, planRoots)
+}
+
+type reconcile func(context.Context, string, int, string, string, func() error) error
+
+func report(
+	ctx context.Context,
+	reader *github.Client,
+	reporter *github.Client,
+	number int,
+	base string,
+	sha string,
+	plans reconcile,
+) error {
 	current := func() error {
 		pull, _, err := reader.PullRequests.Get(ctx, owner, repo, number)
 		if err != nil {
@@ -72,6 +90,15 @@ func run(ctx context.Context) error {
 	}
 	if err := current(); err != nil {
 		return err
+	}
+
+	comparison, _, err := reader.Repositories.CompareCommits(ctx, owner, repo, base, sha, nil)
+	if err != nil {
+		return fmt.Errorf("compare preview commits: %w", err)
+	}
+
+	if comparison.GetMergeBaseCommit().GetSHA() != base {
+		return errChanged
 	}
 
 	details := os.Getenv("TERRAKUBE_PREVIEW_UI_URL")
@@ -103,9 +130,15 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("create plan check: %w", err)
 	}
 
-	planErr := planRoots(ctx, apiURL, number, base, sha, current)
+	planContext, cancel := context.WithTimeout(ctx, previewTimeout)
+	defer cancel()
+	planErr := plans(planContext, apiURL, number, base, sha, current)
+	if planErr == nil {
+		planErr = current()
+	}
+
 	conclusion := "success"
-	summary := "All affected preview workspaces completed their plans."
+	summary := "Both preview workspaces completed their plans."
 	if planErr != nil {
 		conclusion = "failure"
 		summary = "The preview could not verify a successful plan for this pull request."
@@ -153,36 +186,17 @@ func planRoots(
 		return errWorkspace
 	}
 
-	for _, root := range []struct{ path, workspace string }{
-		{
-			"qa.affected",
-			os.Getenv("TERRAKUBE_PREVIEW_QA_ID"),
-		},
-		{"prod.affected", os.Getenv("TERRAKUBE_PREVIEW_PROD_ID")},
+	for _, workspace := range []string{
+		os.Getenv("TERRAKUBE_PREVIEW_QA_ID"),
+		os.Getenv("TERRAKUBE_PREVIEW_PROD_ID"),
 	} {
-		if !uuid.MatchString(root.workspace) {
+		if !uuid.MatchString(workspace) {
 			return errWorkspace
-		}
-
-		output, err := os.ReadFile(root.path)
-		if err != nil {
-			slog.Error("Could not read the affected root", "path", root.path, "err", err)
-
-			return fmt.Errorf("read trusted root selection: %w", err)
-		}
-
-		value := strings.TrimSpace(string(output))
-		if value != "true" && value != "false" {
-			return errSelection
-		}
-
-		if value == "false" {
-			continue
 		}
 
 		if err := client.plan(
 			ctx,
-			root.workspace,
+			workspace,
 			sha,
 			fmt.Sprintf("configs-pr-%d-%s-%s", number, base, sha),
 			current,
@@ -192,7 +206,7 @@ func planRoots(
 		}
 	}
 
-	return current()
+	return nil
 }
 
 // Main runs the Configs preview and returns its exit status.
