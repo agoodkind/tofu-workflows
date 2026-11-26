@@ -1,0 +1,20 @@
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.3@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS build
+ARG TARGETARCH
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH
+COPY --from=configsctl-source . /src/configsctl
+WORKDIR /src/configsctl
+RUN go build -mod=readonly -trimpath -buildvcs=false -o /out/configsctl ./cmd/configsctl
+COPY . /src/tofu-workflows
+WORKDIR /src/tofu-workflows
+RUN go build -mod=readonly -trimpath -buildvcs=false -o /out/terrakube-configs ./cmd/terrakube-configs
+
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.27.3@sha256:e519d3b0a5b285e5aa53ab9eef02bc6bbb9cb04608389b743a136a9ce75f0d1e AS github-cli
+ARG TARGETARCH
+ADD --checksum=sha256:5dcc4e282b9c22c0d31c217805976448c966cfc56c20157c78385a8a62c93cf0 https://github.com/cli/cli/releases/download/v2.85.0/gh_2.85.0_linux_amd64.tar.gz /tmp/gh-amd64.tar.gz
+ADD --checksum=sha256:c554878f62506c88464ef94474322d899dfb30468bb234f23e2355e8e1613cb2 https://github.com/cli/cli/releases/download/v2.85.0/gh_2.85.0_linux_arm64.tar.gz /tmp/gh-arm64.tar.gz
+RUN tar -xzf "/tmp/gh-${TARGETARCH}.tar.gz" -C /tmp --strip-components=2 "gh_2.85.0_linux_${TARGETARCH}/bin/gh"
+
+FROM docker.io/azbuilder/executor:2.34.3@sha256:815bade5764fad24a293157516ad87f5fb611d129020b6facfdca42c75be82ff
+COPY --from=ghcr.io/opentofu/opentofu:1.13.9@sha256:f5aef7f2632b490e3c289a239d7974497d0583f3df6bfa35e8eb31a367ee5ec0 /usr/local/bin/tofu /usr/local/bin/tofu
+COPY --from=github-cli /tmp/gh /usr/local/bin/gh
+COPY --from=build /out/configsctl /out/terrakube-configs /usr/local/bin/
