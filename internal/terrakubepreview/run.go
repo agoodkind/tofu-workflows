@@ -28,6 +28,7 @@ var (
 	errChanged       = errors.New("the pull request repository, base, head, or state changed")
 	errURL           = errors.New("configure private HTTPS Terrakube URLs")
 	errConfiguration = errors.New("configure preview organization, template, and API token")
+	errUnaffected    = errors.New("neither preview workspace changed")
 	errWorkspace     = errors.New("configure distinct preview workspace IDs")
 )
 
@@ -133,12 +134,18 @@ func report(
 	planContext, cancel := context.WithTimeout(ctx, previewTimeout)
 	defer cancel()
 	planErr := plans(planContext, apiURL, number, base, sha, current)
-	if planErr == nil {
+	unaffected := errors.Is(planErr, errUnaffected)
+	if planErr == nil || unaffected {
 		planErr = current()
 	}
 
 	conclusion := "success"
-	summary := "Both preview workspaces completed their plans."
+	summary := "All affected preview workspaces completed their plans."
+	if unaffected {
+		conclusion = "neutral"
+		summary = "The trusted root selector found no affected preview workspaces."
+	}
+
 	if planErr != nil {
 		conclusion = "failure"
 		summary = "The preview could not verify a successful plan for this pull request."
@@ -186,14 +193,16 @@ func planRoots(
 		return errWorkspace
 	}
 
-	for _, workspace := range []string{
-		os.Getenv("TERRAKUBE_PREVIEW_QA_ID"),
-		os.Getenv("TERRAKUBE_PREVIEW_PROD_ID"),
-	} {
-		if !uuid.MatchString(workspace) {
-			return errWorkspace
-		}
+	selected, err := affectedWorkspaces(ctx, base, sha, selectRoot)
+	if err != nil {
+		return err
+	}
 
+	if len(selected) == 0 {
+		return errUnaffected
+	}
+
+	for _, workspace := range selected {
 		if err := client.plan(
 			ctx,
 			workspace,

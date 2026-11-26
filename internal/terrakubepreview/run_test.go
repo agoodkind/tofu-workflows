@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,6 +15,7 @@ import (
 func TestReportBindsCheckToCurrentHeadAndBase(t *testing.T) {
 	for _, scenario := range []string{
 		"current",
+		"unaffected",
 		"head behind main",
 		"main advanced during plan",
 		"plan timeout",
@@ -98,6 +100,10 @@ func TestReportBindsCheckToCurrentHeadAndBase(t *testing.T) {
 							t.Fatal("plan deadline or revision binding missing")
 						}
 
+						if scenario == "unaffected" {
+							return errUnaffected
+						}
+
 						if scenario == "plan timeout" {
 							return context.DeadlineExceeded
 						}
@@ -110,6 +116,10 @@ func TestReportBindsCheckToCurrentHeadAndBase(t *testing.T) {
 					if err != nil || conclusion != "success" {
 						t.Fatalf("current revision: %v, %s", err, conclusion)
 					}
+				case "unaffected":
+					if err != nil || conclusion != "neutral" {
+						t.Fatalf("unaffected: %v %s", err, conclusion)
+					}
 				case "head behind main":
 					if err == nil || ran || conclusion != "" {
 						t.Fatal("allowed stale base")
@@ -118,6 +128,58 @@ func TestReportBindsCheckToCurrentHeadAndBase(t *testing.T) {
 					if err == nil || conclusion != "failure" {
 						t.Fatalf("did not report terminal failure: %v %s", err, conclusion)
 					}
+				}
+			},
+		)
+	}
+}
+
+func TestSelectAffectedWorkspaceRevisions(t *testing.T) {
+	const qa = "00000000-0000-0000-0000-000000000001"
+	const prod = "00000000-0000-0000-0000-000000000002"
+	t.Setenv("TERRAKUBE_PREVIEW_QA_ID", qa)
+	t.Setenv("TERRAKUBE_PREVIEW_PROD_ID", prod)
+
+	for _, tc := range []struct {
+		name             string
+		qa, prod, failed bool
+		want             []string
+	}{
+		{"QA only", true, false, false, []string{qa}},
+		{"production only", false, true, false, []string{prod}},
+		{"shared", true, true, false, []string{qa, prod}},
+		{"unaffected", false, false, false, nil},
+		{"selector error", true, false, true, nil},
+	} {
+		t.Run(
+			tc.name,
+			func(t *testing.T) {
+				roots, err := affectedWorkspaces(
+					t.Context(),
+					"base",
+					"head",
+					func(_ context.Context, root, base, head string) (bool, error) {
+						if base != "base" || head != "head" {
+							t.Fatal("selector received a different revision")
+						}
+
+						if root == "opentofu/suburban/tack-qa" {
+							return tc.qa, nil
+						}
+
+						if root != "opentofu/vault/tack-prod" {
+							t.Fatal(root)
+						}
+
+						if tc.failed {
+							return false, io.ErrUnexpectedEOF
+						}
+
+						return tc.prod, nil
+					},
+				)
+				if (err != nil) != tc.failed || !slices.Equal(roots, tc.want) {
+					t.Fatalf("selected %v, error %v", roots, err)
 				}
 			},
 		)
