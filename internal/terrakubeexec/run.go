@@ -22,37 +22,12 @@ const (
 	planFailed     = 1
 )
 
-type selector string
-
-const (
-	qaSelector         selector = "suburban/tack-qa"
-	prodSelector       selector = "vault/tack-prod"
-	commandCancelGrace          = 15 * time.Second
-)
+const commandCancelGrace = 15 * time.Second
 
 type deployment struct {
 	selector  string
 	workspace string
 	branch    string
-}
-
-func target(name string) (deployment, error) {
-	switch selector(name) {
-	case qaSelector:
-		return deployment{
-			selector:  name,
-			workspace: "tack-qa-deploy",
-			branch:    "terrakube/tack-qa",
-		}, nil
-	case prodSelector:
-		return deployment{
-			selector:  name,
-			workspace: "tack-prod-deploy",
-			branch:    "terrakube/tack-prod",
-		}, nil
-	default:
-		return deployment{}, errUnknownDeployment
-	}
 }
 
 type command struct {
@@ -83,12 +58,14 @@ func Run(
 		return errSelectorRequired
 	}
 
-	selected, err := target(args[0])
-	if err != nil {
-		return err
+	selected := deployment{selector: args[0], workspace: getenv("workspaceName")}
+	if !deploymentWorkspace.MatchString(selected.workspace) {
+		return errWorkspaceAndBranch
 	}
 
-	if getenv("workspaceName") != selected.workspace || getenv("branch") != selected.branch {
+	selected.branch = getenv("branch")
+	if !promotionBranch.MatchString(selected.branch) ||
+		!workspaceSelector.MatchString(selected.selector) {
 		return errWorkspaceAndBranch
 	}
 
@@ -146,6 +123,10 @@ func deployFromCheckout(
 	git := runner(root, environment, stderr)
 	commit, err := prepareCheckout(ctx, git, origin, selected.branch, root)
 	if err != nil {
+		return err
+	}
+
+	if err := requireEnrollment(ctx, git, commit, selected); err != nil {
 		return err
 	}
 
@@ -433,8 +414,7 @@ var (
 	)
 	errMissingPlanLog     = errors.New("expected one redacted Configs plan log")
 	errUnsupportedProcess = errors.New("unsupported executor process")
-	errUnknownDeployment  = errors.New("select suburban/tack-qa or vault/tack-prod")
-	errSelectorRequired   = errors.New("provide one Configs workspace selector")
+	errSelectorRequired   = errors.New("provide one enrolled Configs workspace selector")
 	errWorkspaceAndBranch = errors.New(
 		"configured workspace and promotion branch do not match the Terrakube deployment template",
 	)

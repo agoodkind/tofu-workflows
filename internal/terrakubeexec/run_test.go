@@ -51,10 +51,7 @@ func TestDeployUsesSavedPlanOnlyAfterPlanAndSourceChecks(t *testing.T) {
 			func(t *testing.T) {
 				var calls []string
 				planPath := "/private/deployment.tfplan"
-				selected, err := target("suburban/tack-qa")
-				if err != nil {
-					t.Fatal(err)
-				}
+				selected := deployment{selector: "suburban/tack-qa"}
 
 				job := operation{
 					selected:     selected,
@@ -109,7 +106,7 @@ func TestDeployUsesSavedPlanOnlyAfterPlanAndSourceChecks(t *testing.T) {
 					},
 				}
 
-				err = job.execute(t.Context())
+				err := job.execute(t.Context())
 				if (err != nil) != test.fail || !slices.Equal(calls, test.want) {
 					t.Fatalf(
 						"calls = %v, error = %v; want %v, failure = %v",
