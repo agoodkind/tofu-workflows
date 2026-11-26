@@ -7,10 +7,11 @@ import (
 )
 
 type state struct {
-	current, next string
-	jobs          []jobRecord
-	posts         int
-	err           error
+	current, next       string
+	jobs                []jobRecord
+	posts               int
+	planFailureVerified bool
+	err                 error
 }
 
 func (s *state) promotion(ctx context.Context) (string, error) { return s.current, nil }
@@ -36,6 +37,14 @@ func (s *state) promote(_ context.Context, old, next string) error {
 	return nil
 }
 func (s *state) lookup(ctx context.Context, sha string) ([]jobRecord, error) { return s.jobs, nil }
+func (s *state) verifyFailedPlan(context.Context, jobRecord) error {
+	if !s.planFailureVerified {
+		return errReconcileApply
+	}
+
+	return nil
+}
+
 func (s *state) submit(ctx context.Context, sha string) (string, error) {
 	s.posts++
 
@@ -70,6 +79,11 @@ func TestLostSubmissionResponseNeverReposts(t *testing.T) {
 	}
 
 	s.jobs[0].Commit = "first"
+	if _, err := wake(ctx, "initial", s, s); !errors.Is(err, errReconcileApply) {
+		t.Fatal("failed apply must block promotion", err)
+	}
+
+	s.planFailureVerified = true
 	s.err = nil
 	if _, err := wake(ctx, "initial", s, s); err != nil {
 		t.Fatal(err)

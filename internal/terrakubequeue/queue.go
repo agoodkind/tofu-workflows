@@ -16,6 +16,10 @@ type sourceHistory interface {
 	promote(ctx context.Context, current, next string) error
 }
 
+var errReconcileApply = errors.New(
+	"deployment may have started applying changes; reconcile workspace state before advancing",
+)
+
 var errQueue = errors.New("queue reconciliation failed")
 
 type jobStatus string
@@ -43,6 +47,7 @@ type jobRecord struct {
 type jobService interface {
 	lookup(ctx context.Context, sha string) ([]jobRecord, error)
 	submit(ctx context.Context, sha string) (string, error)
+	verifyFailedPlan(ctx context.Context, job jobRecord) error
 }
 
 // wake submits at most one job and reports whether another commit is waiting.
@@ -78,15 +83,11 @@ func wake(
 			next, err := source.nextCommit(ctx, current)
 
 			return next != "", err
-		case statusCompleted, statusNoChanges, statusFailed, statusCancelled, statusRejected:
-			if job.Commit != current {
-				return false, fmt.Errorf(
-					"%w: job %s finished at %q, expected %s",
-					errQueue,
-					job.ID,
-					job.Commit,
-					current,
-				)
+		case statusCancelled, statusRejected:
+			return false, errReconcileApply
+		case statusCompleted, statusNoChanges, statusFailed:
+			if err := verifyTerminal(ctx, jobs, job, current); err != nil {
+				return false, err
 			}
 		default:
 			return false, fmt.Errorf(
@@ -123,4 +124,37 @@ func wake(
 	following, err := source.nextCommit(ctx, next)
 
 	return following != "", err
+}
+
+func verifyTerminal(ctx context.Context, jobs jobService, job jobRecord, current string) error {
+	if job.Commit != current {
+		slog.ErrorContext(
+			ctx,
+			"unexpected executor commit",
+			"job",
+			job.ID,
+			"expected",
+			current,
+			"actual",
+			job.Commit,
+			"err",
+			errQueue,
+		)
+
+		return fmt.Errorf(
+			"%w: job %s finished at %q, expected %s",
+			errQueue,
+			job.ID,
+			job.Commit,
+			current,
+		)
+	}
+
+	if job.Status == statusFailed {
+		if err := jobs.verifyFailedPlan(ctx, job); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
