@@ -8,12 +8,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/zclconf/go-cty/cty"
 )
 
-func (g gitSource) modulePaths(ctx context.Context, sha string) ([]string, error) {
+func (g gitSource) modulePaths(ctx context.Context, rootTree *object.Tree) ([]string, error) {
 	visited := map[string]bool{}
 	var inputs []string
 
@@ -26,54 +27,46 @@ func (g gitSource) modulePaths(ctx context.Context, sha string) ([]string, error
 		}
 
 		visited[dir] = true
-		files, err := g.git(ctx, "ls-tree", "-z", "--name-only", sha+":"+dir)
-		if err != nil {
-			return nil, err
+		if err := ctx.Err(); err != nil {
+			slog.WarnContext(ctx, "read module cancelled", "directory", dir, "err", err)
+
+			return nil, fmt.Errorf("read module %s: %w", dir, err)
 		}
 
-		for file := range strings.SplitSeq(files, "\x00") {
+		tree := rootTree
+		if dir != "." {
+			var err error
+			tree, err = rootTree.Tree(dir)
+			if err != nil {
+				return nil, fmt.Errorf("read module tree %s: %w", dir, err)
+			}
+		}
+
+		for _, entry := range tree.Entries {
+			file := entry.Name
 			if !strings.HasSuffix(file, ".tf") && !strings.HasSuffix(file, ".tf.json") {
 				continue
 			}
 
 			name := path.Join(dir, file)
-			contents, err := g.git(ctx, "show", sha+":"+name)
+			contents, err := trackedContents(rootTree, name)
 			if err != nil {
 				return nil, err
 			}
 
-			modules, dependencies, err := moduleSources(name, []byte(contents+"\n"), dir, g.Root)
+			modules, dependencies, err := moduleSources(name, []byte(contents), dir, g.Root)
 			if err != nil {
 				return nil, err
 			}
 
 			inputs = append(inputs, dependencies...)
 
-			for _, module := range modules {
-				if !strings.HasPrefix(module, "./") && !strings.HasPrefix(module, "../") {
-					continue
-				}
-
-				resolved := path.Join(dir, module)
-				if strings.HasPrefix(resolved, "../") {
-					slog.ErrorContext(
-						ctx,
-						"module resolves outside the repository",
-						"module",
-						module,
-						"err",
-						errQueue,
-					)
-
-					return nil, fmt.Errorf(
-						"%w: module %s resolves outside Configs",
-						errQueue,
-						module,
-					)
-				}
-
-				pending = append(pending, resolved)
+			localModules, err := resolveLocalModules(ctx, dir, modules)
+			if err != nil {
+				return nil, err
 			}
+
+			pending = append(pending, localModules...)
 		}
 	}
 
@@ -85,6 +78,34 @@ func (g gitSource) modulePaths(ctx context.Context, sha string) ([]string, error
 	slices.Sort(dirs)
 
 	return append(dirs, inputs...), nil
+}
+
+func resolveLocalModules(ctx context.Context, dir string, modules []string) ([]string, error) {
+	var pending []string
+
+	for _, module := range modules {
+		if !strings.HasPrefix(module, "./") && !strings.HasPrefix(module, "../") {
+			continue
+		}
+
+		resolved := path.Join(dir, module)
+		if strings.HasPrefix(resolved, "../") {
+			slog.ErrorContext(
+				ctx,
+				"module resolves outside the repository",
+				"module",
+				module,
+				"err",
+				errQueue,
+			)
+
+			return nil, fmt.Errorf("%w: module %s resolves outside Configs", errQueue, module)
+		}
+
+		pending = append(pending, resolved)
+	}
+
+	return pending, nil
 }
 
 func moduleSources(name string, contents []byte, dir, root string) ([]string, []string, error) {

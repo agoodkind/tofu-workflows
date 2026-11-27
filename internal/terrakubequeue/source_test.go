@@ -3,35 +3,69 @@ package terrakubequeue
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/plumbing/transport/client"
+	"github.com/go-git/go-git/v5/plumbing/transport/file"
+	"github.com/go-git/go-git/v5/plumbing/transport/server"
 )
 
 func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 	remote := t.TempDir()
 	local := t.TempDir()
-	run := func(dir string, args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("%v: %s", err, out)
-		}
-
-		return string(out)
+	remoteRepo, err := git.PlainInit(remote, true)
+	if err != nil {
+		t.Fatal(err)
 	}
-	run(remote, "init", "--bare", "--initial-branch=main")
-	run(local, "init", "--initial-branch=main")
-	run(local, "config", "user.name", "Queue Test")
-	run(local, "config", "user.email", "queue@example.invalid")
-	run(local, "remote", "add", "origin", remote)
+
+	localRepo, err := git.PlainInitWithOptions(
+		local,
+		&git.PlainInitOptions{
+			InitOptions: git.InitOptions{DefaultBranch: plumbing.NewBranchReferenceName("main")},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	worktree, err := localRepo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Use the Go receive-pack server for the temporary bare repository.
+	client.InstallProtocol("file", server.DefaultServer)
+	t.Cleanup(func() { client.InstallProtocol("file", file.DefaultClient) })
+
+	origin, err := localRepo.CreateRemote(&config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{remote},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	push := func(spec config.RefSpec) {
+		t.Helper()
+		if err := origin.PushContext(
+			t.Context(),
+			&git.PushOptions{RefSpecs: []config.RefSpec{spec}},
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	src := gitSource{
-		Directory: local,
-		Root:      "opentofu/qa",
-		Branch:    "terrakube/tack-qa",
+		Directory:        local,
+		Root:             "opentofu/qa",
+		Branch:           "terrakube/tack-qa",
+		allowLocalRemote: true,
 	}
 	write := func(name, body string) {
 		name = filepath.Join(local, name)
@@ -44,14 +78,26 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		}
 	}
 	commit := func() string {
-		run(local, "add", ".")
-		run(local, "commit", "-m", "Update fixture")
-		rev, err := src.git(t.Context(), "rev-parse", "HEAD")
+		t.Helper()
+		if err := worktree.AddWithOptions(&git.AddOptions{All: true}); err != nil {
+			t.Fatal(err)
+		}
+
+		hash, err := worktree.Commit(
+			"Update fixture",
+			&git.CommitOptions{
+				Author: &object.Signature{
+					Name:  "Queue Test",
+					Email: "queue@example.invalid",
+					When:  time.Unix(0, 0),
+				},
+			},
+		)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		return rev
+		return hash.String()
 	}
 	write("opentofu/qa/main.tf", `module "shared" { source = "../modules/shared" }`)
 	write(
@@ -71,7 +117,7 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		`{"version":1,"apps":[{"name":"first","repository":"org/first","deployments":[{"name":"qa","root":"opentofu/qa","promotion_branch":"terrakube/qa","environment":"qa","enabled":false,"shared_inputs":["external/shared"]}]}]}`,
 	)
 	base := commit()
-	run(local, "push", "origin", "HEAD:refs/heads/terrakube/tack-qa")
+	push("refs/heads/main:refs/heads/terrakube/tack-qa")
 	write("opentofu/modules/unrelated/main.tf", "")
 	commit()
 	write("opentofu/modules/shared/config", "first")
@@ -83,11 +129,14 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 	service := commit()
 	write("opentofu/modules/docker-guest/files/ndppd.conf.tftpl", "config")
 	config := commit()
-	run(local, "rm", patch)
+	if _, err := worktree.Remove(patch); err != nil {
+		t.Fatal(err)
+	}
+
 	removed := commit()
 	write("external/module/config", "new")
 	external := commit()
-	run(local, "push", "origin", "main")
+	push("refs/heads/main:refs/heads/main")
 	write(registryPath, "this unreviewed worktree content must not become deployment input")
 	entries, err := readTargets(t.Context(), local)
 	if err != nil || len(entries) != 1 || entries[0].Name != "qa" || *entries[0].Enabled {
@@ -120,11 +169,37 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		}
 
 		if err := src.promote(t.Context(), pair[0], next); err == nil {
-			t.Fatal("duplicate git push won a claim")
+			t.Fatal("a duplicate promotion won the claim")
+		}
+
+		if pair[0] == base {
+			if err := src.promote(t.Context(), base, second); err == nil {
+				t.Fatal("a stale promotion skipped the current commit")
+			}
+		}
+
+		ref, err := remoteRepo.Reference(plumbing.NewBranchReferenceName(src.Branch), true)
+		if err != nil || ref.Hash().String() != next {
+			t.Fatalf("remote promotion ref = %v, want %s (%v)", ref, next, err)
 		}
 	}
 
 	if next, err := src.nextCommit(t.Context(), external); err != nil || next != "" {
 		t.Fatalf("caught up %q: %v", next, err)
+	}
+
+	settings, err := localRepo.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	settings.Raw.Section("extensions").SetOption("worktreeConfig", "true")
+	if err := localRepo.SetConfig(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err = readTargets(t.Context(), local)
+	if err != nil || len(entries) != 1 || entries[0].Name != "qa" {
+		t.Fatalf("expected reviewed enrollment from worktree-config repository: %v", err)
 	}
 }

@@ -14,7 +14,10 @@ import (
 	strictjson "sigs.k8s.io/json"
 )
 
-const receiptPrefix = "CONFIGS_TERRAKUBE_DEPLOYMENT_RESULT "
+const (
+	receiptPrefix        = "CONFIGS_TERRAKUBE_DEPLOYMENT_RESULT "
+	receiptMaxLineLength = 4 << 20
+)
 
 type deploymentReceipt struct {
 	Version     int    `json:"version"`
@@ -91,8 +94,7 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 
 func readReceipt(log io.Reader, expected deploymentReceipt) error {
 	scanner := bufio.NewScanner(log)
-	const maxLineLength = 4 << 20
-	scanner.Buffer(nil, maxLineLength)
+	scanner.Buffer(nil, receiptMaxLineLength)
 	found := false
 
 	for scanner.Scan() {

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	mediaType = "application/vnd.api+json"
-	jobType   = "job"
+	deploymentAudience = "terrakube-configs-deploy"
+	mediaType          = "application/vnd.api+json"
+	jobType            = "job"
 )
 
 type apiClient struct {
@@ -252,8 +253,7 @@ var (
 )
 
 func (client apiClient) authorize(ctx context.Context, req *http.Request) error {
-	const audience = "terrakube-configs-deploy"
-	token, err := client.Token(ctx, audience)
+	token, err := client.Token(ctx, deploymentAudience)
 	if err != nil || token == "" {
 		return errOIDC
 	}

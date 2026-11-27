@@ -10,6 +10,14 @@ import (
 	"testing"
 )
 
+const (
+	receiptTestStepID         = "00000000-0000-4000-8000-000000000004"
+	receiptTestWorkspaceID    = "00000000-0000-4000-8000-000000000002"
+	receiptTestOrganizationID = "00000000-0000-4000-8000-000000000001"
+	receiptTestCommit         = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	receiptTestMarker         = receiptPrefix + `{"version":1,"job_id":"19","workspace_id":"` + receiptTestWorkspaceID + `","commit_id":"` + receiptTestCommit + `","outcome":"plan_failed"}`
+)
+
 type receiptTransport func(*http.Request) (*http.Response, error)
 
 func (transport receiptTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -17,41 +25,50 @@ func (transport receiptTransport) RoundTrip(req *http.Request) (*http.Response, 
 }
 
 func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
-	const step = "00000000-0000-4000-8000-000000000004"
-	const workspace = "00000000-0000-4000-8000-000000000002"
-	const org = "00000000-0000-4000-8000-000000000001"
-	const commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-
-	const marker = receiptPrefix + `{"version":1,"job_id":"19","workspace_id":"` + workspace + `","commit_id":"` + commit + `","outcome":"plan_failed"}`
 	for _, tc := range []struct {
 		name, output string
 		incomplete   bool
 		advance      bool
 	}{
-		{"plan failure", marker, false, true},
-		{"provider output", "| " + marker, false, false},
-		{"wrong commit", strings.Replace(marker, commit, strings.Repeat("b", 40), 1), false, false},
-		{"wrong job", strings.Replace(marker, `"19"`, `"20"`, 1), false, false},
-		{"wrong workspace", strings.Replace(marker, workspace, org, 1), false, false},
+		{"plan failure", receiptTestMarker, false, true},
+		{"provider output", "| " + receiptTestMarker, false, false},
+		{
+			"wrong commit",
+			strings.Replace(receiptTestMarker, receiptTestCommit, strings.Repeat("b", 40), 1),
+			false,
+			false,
+		},
+		{"wrong job", strings.Replace(receiptTestMarker, `"19"`, `"20"`, 1), false, false},
+		{
+			"wrong workspace",
+			strings.Replace(
+				receiptTestMarker,
+				receiptTestWorkspaceID,
+				receiptTestOrganizationID,
+				1,
+			),
+			false,
+			false,
+		},
 		{"apply failed", "apply returned exit 1", false, false},
-		{"duplicate", marker + "\n" + marker, false, false},
+		{"duplicate", receiptTestMarker + "\n" + receiptTestMarker, false, false},
 		{"invalid", receiptPrefix + "{", false, false},
-		{"partial", marker, true, false},
+		{"partial", receiptTestMarker, true, false},
 	} {
 		t.Run(
 			tc.name,
 			func(t *testing.T) {
-				source := &state{current: commit, next: "next"}
+				source := &state{current: receiptTestCommit, next: "next"}
 				issuedTokens := 0
 				requests := 0
 				client := apiClient{
 					BaseURL:      "https://example.invalid/api/v1",
-					Organization: org,
-					Workspace:    workspace,
-					Template:     step,
+					Organization: receiptTestOrganizationID,
+					Workspace:    receiptTestWorkspaceID,
+					Template:     receiptTestStepID,
 
 					Token: func(_ context.Context, audience string) (string, error) {
-						if audience != "terrakube-configs-deploy" {
+						if audience != deploymentAudience {
 							t.Fatal(audience)
 						}
 
@@ -75,7 +92,7 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 						var body string
 						headers := http.Header{}
 						switch req.URL.Path {
-						case "/api/v1/organization/" + org + "/job":
+						case "/api/v1/organization/" + receiptTestOrganizationID + "/job":
 							if req.Method == "POST" {
 								jobs++
 								body = `{"data":{"id":"20","type":"job"}}`
@@ -83,10 +100,10 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 								break
 							}
 
-							body = `{"data":[{"type":"job","id":"19","attributes":{"status":"failed","comments":"configs-main-` + commit + `","commitId":"` + commit + `","templateReference":"` + step + `"},"relationships":{"workspace":{"data":{"id":"` + workspace + `","type":"workspace"}}}}]}`
-						case "/api/v1/organization/" + org + "/job/19/step":
-							body = `{"data":[{"id":"` + step + `","type":"step","attributes":{"status":"failed"}}]}`
-						case "/tfoutput/v1/organization/" + org + "/job/19/step/" + step:
+							body = `{"data":[{"type":"job","id":"19","attributes":{"status":"failed","comments":"configs-main-` + receiptTestCommit + `","commitId":"` + receiptTestCommit + `","templateReference":"` + receiptTestStepID + `"},"relationships":{"workspace":{"data":{"id":"` + receiptTestWorkspaceID + `","type":"workspace"}}}}]}`
+						case "/api/v1/organization/" + receiptTestOrganizationID + "/job/19/step":
+							body = `{"data":[{"id":"` + receiptTestStepID + `","type":"step","attributes":{"status":"failed"}}]}`
+						case "/tfoutput/v1/organization/" + receiptTestOrganizationID + "/job/19/step/" + receiptTestStepID:
 							body = tc.output
 							if tc.incomplete {
 								headers.Set("X-Terrakube-Output-Incomplete", "true")
@@ -110,7 +127,7 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 				} else if !errors.Is(
 					err,
 					errReconcileApply,
-				) || jobs != 0 || source.current != commit {
+				) || jobs != 0 || source.current != receiptTestCommit {
 					t.Fatalf("expected reconciliation: %v, %d submissions", err, jobs)
 				}
 			},

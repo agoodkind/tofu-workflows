@@ -8,6 +8,19 @@ import (
 	"log/slog"
 )
 
+const (
+	statusPending         jobStatus = "pending"
+	statusQueue           jobStatus = "queue"
+	statusRunning         jobStatus = "running"
+	statusWaitingApproval jobStatus = "waitingApproval"
+	statusApproved        jobStatus = "approved"
+	statusCompleted       jobStatus = "completed"
+	statusNoChanges       jobStatus = "noChanges"
+	statusFailed          jobStatus = "failed"
+	statusCancelled       jobStatus = "cancelled"
+	statusRejected        jobStatus = "rejected"
+)
+
 // sourceHistory reads trusted main and advances the promotion ref
 // only if its previous value still matches the caller's observation.
 type sourceHistory interface {
@@ -23,19 +36,6 @@ var errReconcileApply = errors.New(
 var errQueue = errors.New("queue reconciliation failed")
 
 type jobStatus string
-
-const (
-	statusPending         jobStatus = "pending"
-	statusQueue           jobStatus = "queue"
-	statusRunning         jobStatus = "running"
-	statusWaitingApproval jobStatus = "waitingApproval"
-	statusApproved        jobStatus = "approved"
-	statusCompleted       jobStatus = "completed"
-	statusNoChanges       jobStatus = "noChanges"
-	statusFailed          jobStatus = "failed"
-	statusCancelled       jobStatus = "cancelled"
-	statusRejected        jobStatus = "rejected"
-)
 
 // jobRecord identifies one Terrakube job and its executor checkout.
 type jobRecord struct {

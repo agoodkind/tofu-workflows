@@ -160,8 +160,22 @@ func overlaps(left, right string) bool {
 
 func readTargets(ctx context.Context, checkout string) ([]target, error) {
 	source := gitSource{Directory: checkout}
-	const originMain = "refs/remotes/origin/main:"
-	data, err := source.git(ctx, "show", originMain+registryPath)
+	repo, err := source.repository()
+	if err != nil {
+		return nil, err
+	}
+
+	commit, err := commitAtRef(repo, originMain)
+	if err != nil {
+		return nil, err
+	}
+
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("read tree at %s: %w", commit.Hash, err)
+	}
+
+	data, err := trackedContents(tree, registryPath)
 	if err != nil {
 		return nil, err
 	}
@@ -180,13 +194,9 @@ func readTargets(ctx context.Context, checkout string) ([]target, error) {
 	}
 
 	for _, entry := range targets {
-		kind, err := source.git(ctx, "cat-file", "-t", originMain+entry.Root)
+		_, err := tree.Tree(entry.Root)
 		if err != nil {
-			return nil, err
-		}
-
-		if kind != "tree" {
-			return nil, errRegistry
+			return nil, fmt.Errorf("read enrolled root %s at %s: %w", entry.Root, commit.Hash, err)
 		}
 	}
 

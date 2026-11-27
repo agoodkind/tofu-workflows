@@ -14,6 +14,12 @@ import (
 )
 
 const (
+	matrixMode   queueCommand = "matrix"
+	affectedMode queueCommand = "affected"
+)
+
+const (
+	jobPollInterval       = 15 * time.Second
 	argumentCount         = 3
 	affectedArgumentCount = 6
 	matrixArgumentCount   = 4
@@ -131,8 +137,6 @@ func Main() int {
 	return 0
 }
 
-const jobPollInterval = 15 * time.Second
-
 func waitForJob(ctx context.Context) error {
 	timer := time.NewTimer(jobPollInterval)
 	defer timer.Stop()
@@ -210,8 +214,3 @@ func matrixCommand(args []string, entries []target) error {
 }
 
 type queueCommand string
-
-const (
-	matrixMode   queueCommand = "matrix"
-	affectedMode queueCommand = "affected"
-)

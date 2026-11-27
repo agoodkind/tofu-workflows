@@ -10,6 +10,8 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
+const pathTraversalLength = 2
+
 // fileInputs also reads path expressions assigned to locals. A dynamic file
 // name depends on the static directory before the interpolation.
 func fileInputs(file *hcl.File, dir, root string) ([]string, error) {
@@ -69,13 +71,12 @@ func fileFunction(name string) bool {
 }
 
 func templatePath(expr *hclsyntax.TemplateExpr, dir, root string) (string, bool) {
-	const rootAndField = 2
-	if len(expr.Parts) < rootAndField {
+	if len(expr.Parts) < pathTraversalLength {
 		return "", false
 	}
 
 	traversal, diag := hcl.AbsTraversalForExpr(expr.Parts[0])
-	if diag.HasErrors() || len(traversal) != rootAndField || traversal.RootName() != "path" {
+	if diag.HasErrors() || len(traversal) != pathTraversalLength || traversal.RootName() != "path" {
 		return "", false
 	}
 
