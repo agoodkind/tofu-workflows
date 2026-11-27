@@ -15,7 +15,7 @@ func TestReceiptUsesItsOwnLineAfterFragmentedSubprocessOutput(t *testing.T) {
 		"first\r",
 		"CONFIGS_TERRAKUBE_",
 		"DEPLOYMENT_RESULT {\"outcome\":\"plan_failed\"}\n",
-		"CONFIGS_TERRAKUBE_DEPLOYMENT_RESULT incomplete",
+		"TERRAKUBE_DEPLOYMENT_RESULT incomplete",
 	} {
 		if _, err := fmt.Fprint(output, fragment); err != nil {
 			t.Fatal(err)

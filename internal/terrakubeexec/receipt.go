@@ -8,7 +8,7 @@ import (
 	"regexp"
 )
 
-const receiptPrefix = "CONFIGS_TERRAKUBE_DEPLOYMENT_RESULT "
+const receiptPrefix = "TERRAKUBE_DEPLOYMENT_RESULT "
 
 type deploymentReceipt struct {
 	Version     int    `json:"version"`
