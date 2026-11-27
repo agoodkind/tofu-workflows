@@ -23,7 +23,7 @@ const (
 	githubAppUser       = "x-access-token"
 	refSpecSeparator    = ":"
 	originMain          = "refs/remotes/origin/main"
-	configsOrigin       = "https://github.com/agoodkind/configs"
+	githubHTTPSOrigin   = "https://github.com/"
 	gitRepositorySuffix = ".git"
 )
 
@@ -33,6 +33,7 @@ type gitSource struct {
 	Branch           string
 	Root             string
 	Shared           []string
+	expectedOrigin   string
 	allowLocalRemote bool
 }
 
@@ -200,8 +201,8 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 		},
 	}
 	if !g.allowLocalRemote || !filepath.IsAbs(urls[0]) {
-		if urls[0] != configsOrigin && urls[0] != configsOrigin+gitRepositorySuffix {
-			return fmt.Errorf("%w: unexpected Configs origin", errQueue)
+		if !matchesPromotionRepository(urls[0], g.expectedOrigin) {
+			return errPromotionOrigin
 		}
 
 		token := os.Getenv(promotionTokenEnv)
@@ -240,8 +241,12 @@ func affects(files, dirs []string) bool {
 }
 
 var (
-	errCursor   = errors.New("missing full cursor SHA")
-	errRevision = errors.New("promotion requires full commit IDs")
+	errCursor          = errors.New("missing full cursor SHA")
+	errRevision        = errors.New("promotion requires full commit IDs")
+	errPromotionOrigin = fmt.Errorf(
+		"%w: Git origin does not match the GitHub repository selected by the deployment job",
+		errQueue,
+	)
 )
 
 func (source gitSource) affected(ctx context.Context, base, head string) (bool, error) {

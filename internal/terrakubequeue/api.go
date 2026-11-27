@@ -220,7 +220,7 @@ func (client apiClient) lookup(ctx context.Context, sha string) ([]jobRecord, er
 	return jobs, nil
 }
 
-func (client apiClient) verifyWorkspace(ctx context.Context, branch string) error {
+func (client apiClient) verifyWorkspace(ctx context.Context, branch, expectedOrigin string) error {
 	var response envelope[resource]
 	if err := request(
 		ctx,
@@ -241,11 +241,15 @@ func (client apiClient) verifyWorkspace(ctx context.Context, branch string) erro
 		return errWorkspacePolicy
 	}
 
-	if strings.TrimSuffix(workspace.Source, gitRepositorySuffix) != configsOrigin {
+	if !matchesPromotionRepository(workspace.Source, expectedOrigin) {
 		return errWorkspaceSource
 	}
 
 	return nil
+}
+
+func matchesPromotionRepository(actual, expected string) bool {
+	return expected != "" && (actual == expected || actual == expected+gitRepositorySuffix)
 }
 
 var (
@@ -256,7 +260,9 @@ var (
 	errMissingJob      = errors.New("job API did not return a job")
 	errUnexpectedJob   = errors.New("job API returned a job outside the requested submission")
 	errWorkspacePolicy = errors.New("workspace branch or deployment template does not match")
-	errWorkspaceSource = errors.New("workspace must use the trusted Configs HTTPS repository")
+	errWorkspaceSource = errors.New(
+		"workspace must use the GitHub repository selected by the deployment job",
+	)
 )
 
 func (client apiClient) authorize(ctx context.Context, req *http.Request) error {

@@ -206,6 +206,16 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	settings.Remotes[git.DefaultRemoteName].URLs = []string{differentTestOrigin}
+	if err := localRepo.SetConfig(settings); err != nil {
+		t.Fatal(err)
+	}
+
+	src.expectedOrigin = expectedTestOrigin
+	if err := src.promote(t.Context(), base, first); !errors.Is(err, errPromotionOrigin) {
+		t.Fatalf("expected incompatible Git origin to fail before authentication: %v", err)
+	}
+
 	settings.Raw.Section("extensions").SetOption("worktreeConfig", "true")
 	if err := localRepo.SetConfig(settings); err != nil {
 		t.Fatal(err)

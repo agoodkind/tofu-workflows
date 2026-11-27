@@ -15,6 +15,7 @@ import (
 
 const (
 	promotionEnvironmentEnv              = "PROMOTION_ENVIRONMENT"
+	promotionRepositoryEnv               = "PROMOTION_GITHUB_REPOSITORY"
 	baselineSHAEnv                       = "TERRAKUBE_BASELINE_SHA"
 	apiURLEnv                            = "TERRAKUBE_API_URL"
 	organizationIDEnv                    = "TERRAKUBE_ORGANIZATION_ID"
@@ -83,16 +84,24 @@ func runDeployment(ctx context.Context, args []string, entries []target) error {
 		return errDisabled
 	}
 
+	repository := os.Getenv(promotionRepositoryEnv)
+	if !repoName.MatchString(repository) || !validRepoPath(repository) {
+		return errPromotionRepository
+	}
+
+	expectedOrigin := githubHTTPSOrigin + repository
+
 	baseline := os.Getenv(baselineSHAEnv)
 	if !isCanonicalCommit(baseline) {
 		return errBaseline
 	}
 
 	source := gitSource{
-		Directory: args[2],
-		Branch:    selected.Branch,
-		Root:      selected.Root,
-		Shared:    selected.Shared,
+		Directory:      args[2],
+		Branch:         selected.Branch,
+		Root:           selected.Root,
+		Shared:         selected.Shared,
+		expectedOrigin: expectedOrigin,
 	}
 	client := &http.Client{
 		Timeout:       requestTimeout,
@@ -110,7 +119,7 @@ func runDeployment(ctx context.Context, args []string, entries []target) error {
 		return err
 	}
 
-	if err := api.verifyWorkspace(ctx, source.Branch); err != nil {
+	if err := api.verifyWorkspace(ctx, source.Branch, expectedOrigin); err != nil {
 		return err
 	}
 
@@ -121,9 +130,14 @@ var (
 	errAffectedUsage = errors.New(
 		"usage: terrakube-queue affected CONFIGS_CHECKOUT ROOT BASE_SHA HEAD_SHA",
 	)
-	errUsage         = errors.New("usage: terrakube-queue DEPLOYMENT CONFIGS_CHECKOUT")
-	errWorkspaceName = errors.New("workspace is not enrolled in reviewed Configs main")
-	errBaseline      = errors.New(baselineSHAEnv + " must be the full initial promotion commit")
+	errUsage               = errors.New("usage: terrakube-queue DEPLOYMENT CONFIGS_CHECKOUT")
+	errWorkspaceName       = errors.New("workspace is not enrolled in reviewed Configs main")
+	errPromotionRepository = errors.New(
+		promotionRepositoryEnv + " must be a GitHub owner/repository name",
+	)
+	errBaseline = errors.New(
+		baselineSHAEnv + " must be the full initial promotion commit",
+	)
 )
 
 // Main runs the queue command and returns its process status.
