@@ -2,6 +2,7 @@ package terrakubequeue
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -107,8 +108,7 @@ func readReceipt(log io.Reader, expected deploymentReceipt) error {
 	found := false
 
 	for scanner.Scan() {
-		line := scanner.Text()
-		payload, ok := strings.CutPrefix(line, receiptPrefix)
+		payload, ok := bytes.CutPrefix(scanner.Bytes(), []byte(receiptPrefix))
 		if !ok {
 			continue
 		}
@@ -118,7 +118,7 @@ func readReceipt(log io.Reader, expected deploymentReceipt) error {
 		}
 
 		var actual deploymentReceipt
-		problems, err := strictjson.UnmarshalStrict([]byte(payload), &actual)
+		problems, err := strictjson.UnmarshalStrict(payload, &actual)
 		if err != nil || len(problems) != 0 || actual != expected {
 			return errReconcileApply
 		}

@@ -152,14 +152,7 @@ func request[T resource | []resource](
 }
 
 func (client apiClient) submit(ctx context.Context, sha string) (string, error) {
-	record := client.job(sha)
-	data, err := json.Marshal(
-		struct {
-			Data resource `json:"data"`
-		}{
-			record,
-		},
-	)
+	data, err := json.Marshal(envelope[resource]{Data: client.job(sha)})
 	if err != nil {
 		slog.ErrorContext(ctx, "encode Terrakube job", "error", err)
 

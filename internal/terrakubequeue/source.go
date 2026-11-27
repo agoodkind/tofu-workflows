@@ -2,16 +2,15 @@ package terrakubequeue
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/agoodkind/tofu-workflows/internal/input"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -20,17 +19,13 @@ import (
 )
 
 const (
-	commitSHAPattern    = "^[0-9a-f]{40}$"
 	promotionTokenEnv   = "PROMOTION_GITHUB_TOKEN"
 	githubAppUser       = "x-access-token"
 	refSpecSeparator    = ":"
-	shaBytes            = 20
 	originMain          = "refs/remotes/origin/main"
 	configsOrigin       = "https://github.com/agoodkind/configs"
 	gitRepositorySuffix = ".git"
 )
-
-var revision = regexp.MustCompile(commitSHAPattern)
 
 // gitSource reads main and the promotion refs in the Configs checkout.
 type gitSource struct {
@@ -107,7 +102,7 @@ func (g gitSource) promotion(ctx context.Context) (string, error) {
 }
 
 func (g gitSource) nextCommit(ctx context.Context, current string) (string, error) {
-	if !revision.MatchString(current) {
+	if !isCanonicalCommit(current) {
 		return "", errCursor
 	}
 
@@ -157,7 +152,7 @@ func (g gitSource) nextCommit(ctx context.Context, current string) (string, erro
 	slices.Reverse(commits)
 
 	for _, commit := range commits {
-		affected, err := g.affected(ctx, current, commit)
+		affected, err := g.affectedInRepository(ctx, repo, current, commit)
 		current = commit
 		if err != nil {
 			return "", err
@@ -172,7 +167,7 @@ func (g gitSource) nextCommit(ctx context.Context, current string) (string, erro
 }
 
 func (g gitSource) promote(ctx context.Context, current, next string) error {
-	if !revision.MatchString(current) || !revision.MatchString(next) {
+	if !isCanonicalCommit(current) || !isCanonicalCommit(next) {
 		return errRevision
 	}
 
@@ -261,6 +256,15 @@ func (source gitSource) affected(ctx context.Context, base, head string) (bool, 
 		return false, err
 	}
 
+	return source.affectedInRepository(ctx, repo, base, head)
+}
+
+func (source gitSource) affectedInRepository(
+	ctx context.Context,
+	repo *git.Repository,
+	base string,
+	head string,
+) (bool, error) {
 	before, err := commitTree(repo, base)
 	if err != nil {
 		return false, err
@@ -339,15 +343,14 @@ func trackedContents(tree *object.Tree, path string) (string, error) {
 	return data, nil
 }
 
+func isCanonicalCommit(value string) bool {
+	return input.Commit(value) && value == strings.ToLower(value)
+}
+
 func canonicalCommit(value string) string {
-	var digest [shaBytes]byte
-	if len(value) != hex.EncodedLen(len(digest)) {
+	if !input.Commit(value) {
 		return ""
 	}
 
-	if _, err := hex.Decode(digest[:], []byte(value)); err != nil {
-		return ""
-	}
-
-	return hex.EncodeToString(digest[:])
+	return strings.ToLower(value)
 }

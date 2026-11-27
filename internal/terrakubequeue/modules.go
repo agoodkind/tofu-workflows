@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path"
-	"slices"
 	"strings"
 
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -38,6 +37,7 @@ func (g gitSource) modulePaths(ctx context.Context, rootTree *object.Tree) ([]st
 		}
 
 		visited[dir] = true
+		inputs = append(inputs, dir)
 		if err := ctx.Err(); err != nil {
 			slog.WarnContext(ctx, "read module cancelled", "directory", dir, "err", err)
 
@@ -61,7 +61,7 @@ func (g gitSource) modulePaths(ctx context.Context, rootTree *object.Tree) ([]st
 			}
 
 			name := path.Join(dir, file)
-			contents, err := trackedContents(rootTree, name)
+			contents, err := trackedContents(tree, file)
 			if err != nil {
 				return nil, err
 			}
@@ -82,14 +82,7 @@ func (g gitSource) modulePaths(ctx context.Context, rootTree *object.Tree) ([]st
 		}
 	}
 
-	dirs := make([]string, 0, len(visited))
-	for dir := range visited {
-		dirs = append(dirs, dir)
-	}
-
-	slices.Sort(dirs)
-
-	return append(dirs, inputs...), nil
+	return inputs, nil
 }
 
 func resolveLocalModules(ctx context.Context, dir string, modules []string) ([]string, error) {
@@ -168,7 +161,5 @@ func moduleSources(name string, contents []byte, dir, root string) ([]string, []
 		sources = append(sources, value.AsString())
 	}
 
-	inputs, err := fileInputs(file, dir, root)
-
-	return sources, inputs, err
+	return sources, fileInputs(file, dir, root), nil
 }

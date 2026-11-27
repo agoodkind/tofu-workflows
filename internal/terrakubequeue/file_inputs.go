@@ -31,16 +31,16 @@ const (
 
 // fileInputs also reads path expressions assigned to locals. A dynamic file
 // name depends on the static directory before the interpolation.
-func fileInputs(file *hcl.File, dir, root string) ([]string, error) {
+func fileInputs(file *hcl.File, dir, root string) []string {
 	body, ok := file.Body.(*hclsyntax.Body)
 	if !ok {
 		// JSON configurations may contain expression strings anywhere in an object.
 		// Treat the whole repository as an input until those expressions can be resolved.
-		return []string{repoRootPath}, nil
+		return []string{repoRootPath}
 	}
 
 	var inputs []string
-	diag := hclsyntax.VisitAll(
+	_ = hclsyntax.VisitAll(
 		body,
 		func(node hclsyntax.Node) hcl.Diagnostics {
 			switch expr := node.(type) {
@@ -61,11 +61,7 @@ func fileInputs(file *hcl.File, dir, root string) ([]string, error) {
 		},
 	)
 
-	if diag.HasErrors() {
-		return nil, diag
-	}
-
-	return inputs, nil
+	return inputs
 }
 
 func fileFunction(name string) bool {
@@ -103,12 +99,13 @@ func templatePath(expr *hclsyntax.TemplateExpr, dir, root string) (string, bool)
 		return "", false
 	}
 
-	base, supported := map[string]string{
-		pathModuleField:           dir,
-		pathRootField:             root,
-		pathWorkingDirectoryField: root,
-	}[field.Name]
-	if !supported {
+	var base string
+	switch field.Name {
+	case pathModuleField:
+		base = dir
+	case pathRootField, pathWorkingDirectoryField:
+		base = root
+	default:
 		return "", false
 	}
 

@@ -84,7 +84,7 @@ func runDeployment(ctx context.Context, args []string, entries []target) error {
 	}
 
 	baseline := os.Getenv(baselineSHAEnv)
-	if !revision.MatchString(baseline) {
+	if !isCanonicalCommit(baseline) {
 		return errBaseline
 	}
 

@@ -151,9 +151,7 @@ func verifyTerminal(ctx context.Context, jobs jobService, job jobRecord, current
 	}
 
 	if job.Status == statusFailed {
-		if err := jobs.verifyFailedPlan(ctx, job); err != nil {
-			return err
-		}
+		return jobs.verifyFailedPlan(ctx, job)
 	}
 
 	return nil

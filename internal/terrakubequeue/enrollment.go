@@ -112,7 +112,6 @@ func (catalog registry) targets() ([]target, error) {
 	}
 
 	used := map[string]bool{}
-	var roots []string
 	result := []target{}
 
 	for _, app := range catalog.Apps {
@@ -138,8 +137,8 @@ func (catalog registry) targets() ([]target, error) {
 				return nil, errRegistry
 			}
 
-			for _, root := range roots {
-				if overlaps(entry.Root, root) {
+			for _, existing := range result {
+				if overlaps(entry.Root, existing.Root) {
 					return nil, errRegistry
 				}
 			}
@@ -147,12 +146,11 @@ func (catalog registry) targets() ([]target, error) {
 			used[targetNameIndexPrefix+entry.Name] = true
 			used[branchIndexPrefix+entry.Branch] = true
 			used[environmentIndexPrefix+entry.Environment] = true
-			roots = append(roots, entry.Root)
 			result = append(result, entry)
 		}
 	}
 
-	if !independentRoots(result, roots) {
+	if !independentRoots(result) {
 		return nil, errRegistry
 	}
 
@@ -166,11 +164,11 @@ func (release releaseAdapter) valid() bool {
 		slices.Contains([]string{ymlExtension, yamlExtension}, path.Ext(release.Workflow))
 }
 
-func independentRoots(entries []target, roots []string) bool {
+func independentRoots(entries []target) bool {
 	for _, entry := range entries {
 		for _, input := range entry.Shared {
-			for _, root := range roots {
-				if root != entry.Root && overlaps(input, root) {
+			for _, other := range entries {
+				if other.Root != entry.Root && overlaps(input, other.Root) {
 					return false
 				}
 			}
