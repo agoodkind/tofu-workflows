@@ -56,7 +56,7 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Use the Go receive-pack server for the temporary bare repository.
+	// go-git serves the temporary repository inside the test process.
 	client.InstallProtocol("file", server.DefaultServer)
 	t.Cleanup(func() { client.InstallProtocol("file", file.DefaultClient) })
 

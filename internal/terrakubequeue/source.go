@@ -27,7 +27,8 @@ const (
 	gitRepositorySuffix = ".git"
 )
 
-// gitSource reads main and the promotion refs in the Configs checkout.
+// gitSource finds reviewed changes for one workspace. It reads Configs main
+// for merge order and the promotion branch for the last claimed commit.
 type gitSource struct {
 	Directory        string
 	Branch           string
@@ -213,8 +214,9 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 		options.Auth = &githttp.BasicAuth{Username: githubAppUser, Password: token}
 	}
 
-	// RequireRemoteRefs checks the advertised commit. Receive-pack also compares
-	// this commit under the server's ref lock before it accepts the update.
+	// Only one worker can claim a commit. go-git checks the expected commit
+	// before pushing. Git checks it again while holding the branch lock.
+	// If another worker has already advanced the branch, this push fails.
 	if err := remote.PushContext(ctx, options); err != nil {
 		slog.ErrorContext(ctx, "claim promotion ref", "ref", ref, "err", err)
 

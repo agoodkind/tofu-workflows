@@ -1,4 +1,5 @@
-// Command terrakube-queue submits reviewed Configs commits.
+// Command terrakube-queue submits reviewed Configs commits to Terrakube in
+// merge order. Each workspace has its own deployment queue.
 package main
 
 import (

@@ -23,8 +23,10 @@ const (
 	commonDirectoryFile     = "commondir"
 )
 
-// Remote tracking refs and committed objects use the common Git directory.
-// Reading them does not require worktree-specific configuration or HEAD.
+// sharedObjectStorage lets the queue read commits and remote refs from linked
+// checkouts. Git stores both in its common directory. go-git rejects
+// worktreeConfig, so Config removes that option from its in-memory copy.
+// For example, a linked checkout reads origin/main from that directory.
 type sharedObjectStorage struct {
 	*filesystem.Storage
 }

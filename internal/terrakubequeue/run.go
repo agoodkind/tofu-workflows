@@ -36,14 +36,10 @@ const (
 	requestTimeout = 30 * time.Second
 )
 
-// run reconciles one Configs workspace with its protected branch.
-//
-// It reads deployment metadata from the GitHub environment. The checkout
-// must contain the full main history and the workspace promotion branch.
-//
-// Example:
-//
-//	terrakube-queue tack-qa /workspace/configs
+// run reads reviewed workspace settings from Configs main. It lists
+// workspaces, checks whether commits affect a workspace, or submits
+// deployments. Deployment mode reads its settings from the GitHub
+// environment and uses the full history of main and the promotion branch.
 func run(ctx context.Context, args []string) error {
 	if len(args) < argumentCount {
 		return errUsage
@@ -140,13 +136,13 @@ var (
 	)
 )
 
-// Main runs the queue command and returns its process status.
+// Main runs the Terrakube queue and returns an exit status for the workflow.
+// If processing fails, Main writes the error to the runner log.
 //
-// A failed reconciliation writes its diagnostic to the runner log.
+// For example, submit changes for Tack QA from a Configs checkout with the
+// GitHub deployment settings already present in the environment.
 //
-// Example:
-//
-//	os.Exit(terrakubequeue.Main())
+//	terrakube-queue tack-qa /workspace/configs
 func Main() int {
 	if err := run(context.Background(), os.Args); err != nil {
 		slog.Error("Configs queue failed", "error", err)

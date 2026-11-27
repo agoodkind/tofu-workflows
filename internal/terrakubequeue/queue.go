@@ -1,4 +1,6 @@
-// Package terrakubequeue reconciles protected Configs promotion branches.
+// Package terrakubequeue deploys reviewed Configs changes in merge order.
+// Each workspace tracks the last commit claimed for deployment on a protected
+// Git branch.
 package terrakubequeue
 
 import (
@@ -21,8 +23,9 @@ const (
 	statusRejected        jobStatus = "rejected"
 )
 
-// sourceHistory reads trusted main and advances the promotion ref
-// only if its previous value still matches the caller's observation.
+// sourceHistory reads reviewed commits and claims each promotion before job
+// submission. A claim succeeds only if the promotion branch still points to
+// the expected commit.
 type sourceHistory interface {
 	promotion(ctx context.Context) (string, error)
 	nextCommit(ctx context.Context, current string) (string, error)
@@ -37,7 +40,9 @@ var errQueue = errors.New("queue reconciliation failed")
 
 type jobStatus string
 
-// jobRecord identifies one Terrakube job and its executor checkout.
+// jobRecord records a Terrakube job's status and the commit reported by its
+// executor. Before advancing, the queue checks that commit against the
+// workspace's promotion branch.
 type jobRecord struct {
 	ID     string
 	Status jobStatus
@@ -50,7 +55,9 @@ type jobService interface {
 	verifyFailedPlan(ctx context.Context, job jobRecord) error
 }
 
-// wake submits at most one job and reports whether another commit is waiting.
+// wake advances a single workspace in merge order. It checks the previous job
+// before submitting another. For example, if the previous job is still running
+// and a commit is waiting, wake tells the caller to check again later.
 func wake(
 	ctx context.Context,
 	baseline string,

@@ -102,6 +102,8 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 	return readReceipt(res.Body, expected)
 }
 
+// readReceipt checks the complete job log for one expected deployment result.
+// For example, a second matching plan_failed record invalidates the log.
 func readReceipt(log io.Reader, expected deploymentReceipt) error {
 	scanner := bufio.NewScanner(log)
 	scanner.Buffer(nil, receiptMaxLineLength)

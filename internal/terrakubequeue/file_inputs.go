@@ -29,13 +29,15 @@ const (
 	pathWorkingDirectoryField    = "cwd"
 )
 
-// fileInputs also reads path expressions assigned to locals. A dynamic file
-// name depends on the static directory before the interpolation.
+// fileInputs tracks files a workspace references, including files outside its
+// module directory. It checks local values and file function calls. A path
+// such as ${path.module}/../templates/${var.name}.tftpl makes changes in the
+// neighboring templates directory relevant to the workspace.
 func fileInputs(file *hcl.File, dir, root string) []string {
 	body, ok := file.Body.(*hclsyntax.Body)
 	if !ok {
-		// JSON configurations may contain expression strings anywhere in an object.
-		// Treat the whole repository as an input until those expressions can be resolved.
+		// JSON expressions can reference files from any object. Count every
+		// path in the repository as a possible dependency.
 		return []string{repoRootPath}
 	}
 
