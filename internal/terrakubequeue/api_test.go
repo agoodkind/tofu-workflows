@@ -11,7 +11,7 @@ const canonicalWorkspaceUUID = "abcdef01-2345-4000-8000-abcdef012345"
 
 func TestAPIRejectsNoncanonicalUUIDs(t *testing.T) {
 	client := apiClient{
-		BaseURL:      "https://example.invalid/api/v1",
+		BaseURL:      receiptTestAPIURL,
 		Organization: canonicalWorkspaceUUID,
 		Workspace:    canonicalWorkspaceUUID,
 		Template:     canonicalWorkspaceUUID,

@@ -15,7 +15,13 @@ import (
 	"github.com/go-git/go-git/v5/storage/filesystem"
 )
 
-const worktreeConfigExtension = "worktreeconfig"
+const (
+	gitMetadataLineEnding   = "\n"
+	worktreeConfigExtension = "worktreeconfig"
+	gitExtensionsSection    = "extensions"
+	gitDirectoryPrefix      = "gitdir: "
+	commonDirectoryFile     = "commondir"
+)
 
 // Remote tracking refs and committed objects use the common Git directory.
 // Reading them does not require worktree-specific configuration or HEAD.
@@ -31,7 +37,7 @@ func (s sharedObjectStorage) Config() (*config.Config, error) {
 		return nil, fmt.Errorf("read shared Git configuration: %w", err)
 	}
 
-	extension := cfg.Raw.Section("extensions")
+	extension := cfg.Raw.Section(gitExtensionsSection)
 	if !extension.HasOption(worktreeConfigExtension) {
 		return nil, fmt.Errorf(
 			"%w: expected extensions.worktreeConfig in common configuration",
@@ -45,7 +51,7 @@ func (s sharedObjectStorage) Config() (*config.Config, error) {
 }
 
 func openSharedObjects(checkout string) (*git.Repository, error) {
-	dot := filepath.Join(checkout, ".git")
+	dot := filepath.Join(checkout, git.GitDirName)
 	info, err := os.Stat(dot)
 	if err != nil {
 		return nil, fmt.Errorf("locate %s: %w", dot, err)
@@ -57,7 +63,10 @@ func openSharedObjects(checkout string) (*git.Repository, error) {
 			return nil, fmt.Errorf("read %s: %w", dot, err)
 		}
 
-		path, ok := strings.CutPrefix(strings.TrimSuffix(string(data), "\n"), "gitdir: ")
+		path, ok := strings.CutPrefix(
+			strings.TrimSuffix(string(data), gitMetadataLineEnding),
+			gitDirectoryPrefix,
+		)
 		if !ok || path == "" {
 			return nil, fmt.Errorf("%w: invalid gitdir in %s", errQueue, dot)
 		}
@@ -70,9 +79,9 @@ func openSharedObjects(checkout string) (*git.Repository, error) {
 		return nil, fmt.Errorf("open Git directory %s: %w", dot, err)
 	}
 	defer gitDirectory.Close()
-	common, err := gitDirectory.ReadFile("commondir")
+	common, err := gitDirectory.ReadFile(commonDirectoryFile)
 	if err == nil {
-		dot = resolveGitPath(dot, strings.TrimSuffix(string(common), "\n"))
+		dot = resolveGitPath(dot, strings.TrimSuffix(string(common), gitMetadataLineEnding))
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read commondir in %s: %w", dot, err)
 	}

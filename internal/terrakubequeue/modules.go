@@ -14,6 +14,17 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
+const (
+	hclConfigExtension    = ".tf"
+	jsonConfigExtension   = ".tf.json"
+	jsonExtension         = ".json"
+	localModulePrefix     = "./"
+	parentModulePrefix    = "../"
+	moduleBlockType       = "module"
+	moduleLabelName       = "name"
+	moduleSourceAttribute = "source"
+)
+
 func (g gitSource) modulePaths(ctx context.Context, rootTree *object.Tree) ([]string, error) {
 	visited := map[string]bool{}
 	var inputs []string
@@ -34,7 +45,7 @@ func (g gitSource) modulePaths(ctx context.Context, rootTree *object.Tree) ([]st
 		}
 
 		tree := rootTree
-		if dir != "." {
+		if dir != repoRootPath {
 			var err error
 			tree, err = rootTree.Tree(dir)
 			if err != nil {
@@ -44,7 +55,8 @@ func (g gitSource) modulePaths(ctx context.Context, rootTree *object.Tree) ([]st
 
 		for _, entry := range tree.Entries {
 			file := entry.Name
-			if !strings.HasSuffix(file, ".tf") && !strings.HasSuffix(file, ".tf.json") {
+			if !strings.HasSuffix(file, hclConfigExtension) &&
+				!strings.HasSuffix(file, jsonConfigExtension) {
 				continue
 			}
 
@@ -84,12 +96,13 @@ func resolveLocalModules(ctx context.Context, dir string, modules []string) ([]s
 	var pending []string
 
 	for _, module := range modules {
-		if !strings.HasPrefix(module, "./") && !strings.HasPrefix(module, "../") {
+		if !strings.HasPrefix(module, localModulePrefix) &&
+			!strings.HasPrefix(module, parentModulePrefix) {
 			continue
 		}
 
 		resolved := path.Join(dir, module)
-		if strings.HasPrefix(resolved, "../") {
+		if strings.HasPrefix(resolved, parentModulePrefix) {
 			slog.ErrorContext(
 				ctx,
 				"module resolves outside the repository",
@@ -112,7 +125,7 @@ func moduleSources(name string, contents []byte, dir, root string) ([]string, []
 	parser := hclparse.NewParser()
 	var file *hcl.File
 	var diagnostics hcl.Diagnostics
-	if strings.HasSuffix(name, ".json") {
+	if strings.HasSuffix(name, jsonExtension) {
 		file, diagnostics = parser.ParseJSON(contents, name)
 	} else {
 		file, diagnostics = parser.ParseHCL(contents, name)
@@ -125,7 +138,9 @@ func moduleSources(name string, contents []byte, dir, root string) ([]string, []
 	}
 
 	blocks, _, diagnostics := file.Body.PartialContent(&hcl.BodySchema{
-		Blocks: []hcl.BlockHeaderSchema{{Type: "module", LabelNames: []string{"name"}}},
+		Blocks: []hcl.BlockHeaderSchema{
+			{Type: moduleBlockType, LabelNames: []string{moduleLabelName}},
+		},
 	})
 	if diagnostics.HasErrors() {
 		return nil, nil, fmt.Errorf("read modules in %s: %w", name, diagnostics)
@@ -135,13 +150,13 @@ func moduleSources(name string, contents []byte, dir, root string) ([]string, []
 
 	for _, block := range blocks.Blocks {
 		attrs, _, diag := block.Body.PartialContent(&hcl.BodySchema{
-			Attributes: []hcl.AttributeSchema{{Name: "source", Required: true}},
+			Attributes: []hcl.AttributeSchema{{Name: moduleSourceAttribute, Required: true}},
 		})
 		if diag.HasErrors() {
 			return nil, nil, fmt.Errorf("read module source in %s: %w", name, diag)
 		}
 
-		value, diag := attrs.Attributes["source"].Expr.Value(nil)
+		value, diag := attrs.Attributes[moduleSourceAttribute].Expr.Value(nil)
 		if diag.HasErrors() || value.IsNull() || !value.Type().Equals(cty.String) {
 			return nil, nil, fmt.Errorf(
 				"%w: module source in %s must be a literal string",

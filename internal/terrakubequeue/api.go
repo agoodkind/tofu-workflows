@@ -16,9 +16,23 @@ import (
 )
 
 const (
-	deploymentAudience = "terrakube-configs-deploy"
-	mediaType          = "application/vnd.api+json"
-	jobType            = "job"
+	httpPathSeparator   = "/"
+	jobQueryPrefix      = jobAPIPath + "?"
+	httpsScheme         = "https"
+	workspaceType       = "workspace"
+	jobCommentPrefix    = "configs-main-"
+	organizationAPIPath = "/organization/"
+	jobAPIPath          = "/job"
+	workspaceAPIPath    = "/workspace/"
+	jobFilterParameter  = "filter[job]"
+	jobFilterFormat     = "workspace.id==%s;comments==%s;templateReference==%s"
+	acceptHeader        = "Accept"
+	contentTypeHeader   = "Content-Type"
+	authorizationHeader = "Authorization"
+	bearerPrefix        = "Bearer "
+	deploymentAudience  = "terrakube-configs-deploy"
+	mediaType           = "application/vnd.api+json"
+	jobType             = "job"
 )
 
 type apiClient struct {
@@ -38,7 +52,7 @@ func isCanonicalUUID(value string) bool {
 
 func (client apiClient) validate() error {
 	u, err := url.Parse(client.BaseURL)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil ||
+	if err != nil || u.Scheme != httpsScheme || u.Hostname() == "" || u.User != nil ||
 		u.RawQuery != "" ||
 		u.Fragment != "" {
 		return errAPIURL
@@ -83,8 +97,8 @@ type resource struct {
 func (client apiClient) job(sha string) resource {
 	var record resource
 	record.Type = jobType
-	record.Attributes = attributes{Comments: "configs-main-" + sha, Template: client.Template}
-	record.Relationships.Workspace.Data = identifier{Type: "workspace", ID: client.Workspace}
+	record.Attributes = attributes{Comments: jobCommentPrefix + sha, Template: client.Template}
+	record.Relationships.Workspace.Data = identifier{Type: workspaceType, ID: client.Workspace}
 
 	return record
 }
@@ -103,8 +117,8 @@ func request[T resource | []resource](
 ) error {
 	endpoint := strings.TrimRight(
 		client.BaseURL,
-		"/",
-	) + "/organization/" + client.Organization + suffix
+		httpPathSeparator,
+	) + organizationAPIPath + client.Organization + suffix
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		slog.ErrorContext(ctx, "create Terrakube request", "error", err)
@@ -116,9 +130,9 @@ func request[T resource | []resource](
 		return err
 	}
 
-	req.Header.Set("Accept", mediaType)
+	req.Header.Set(acceptHeader, mediaType)
 	if body != nil {
-		req.Header.Set("Content-Type", mediaType)
+		req.Header.Set(contentTypeHeader, mediaType)
 	}
 
 	res, err := client.Client.Do(req)
@@ -126,7 +140,7 @@ func request[T resource | []resource](
 		return fmt.Errorf("send job API request: %w", err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
+	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("%w: Terrakube %s job request returned %s", errQueue, method, res.Status)
 	}
 
@@ -157,7 +171,7 @@ func (client apiClient) submit(ctx context.Context, sha string) (string, error) 
 		ctx,
 		client,
 		http.MethodPost,
-		"/job",
+		jobAPIPath,
 		bytes.NewReader(data),
 		&response,
 	); err != nil {
@@ -175,15 +189,15 @@ func (client apiClient) lookup(ctx context.Context, sha string) ([]jobRecord, er
 	wanted := client.job(sha)
 	query := url.Values{}
 	query.Set(
-		"filter[job]",
-		"workspace.id=="+client.Workspace+";comments=="+wanted.Attributes.Comments+";templateReference=="+client.Template,
+		jobFilterParameter,
+		fmt.Sprintf(jobFilterFormat, client.Workspace, wanted.Attributes.Comments, client.Template),
 	)
 	var response envelope[[]resource]
 	if err := request(
 		ctx,
 		client,
 		http.MethodGet,
-		"/job?"+query.Encode(),
+		jobQueryPrefix+query.Encode(),
 		nil,
 		&response,
 	); err != nil {
@@ -219,7 +233,7 @@ func (client apiClient) verifyWorkspace(ctx context.Context, branch string) erro
 		ctx,
 		client,
 		http.MethodGet,
-		"/workspace/"+client.Workspace,
+		workspaceAPIPath+client.Workspace,
 		nil,
 		&response,
 	); err != nil {
@@ -227,14 +241,14 @@ func (client apiClient) verifyWorkspace(ctx context.Context, branch string) erro
 	}
 
 	workspace := response.Data.Attributes
-	if response.Data.Type != "workspace" || response.Data.ID != client.Workspace ||
+	if response.Data.Type != workspaceType || response.Data.ID != client.Workspace ||
 		workspace.Branch != branch ||
 		!workspace.RestrictApplyToConfiguredBranch ||
 		workspace.DefaultTemplate != client.Template {
 		return errWorkspacePolicy
 	}
 
-	if strings.TrimSuffix(workspace.Source, ".git") != "https://github.com/agoodkind/configs" {
+	if strings.TrimSuffix(workspace.Source, gitRepositorySuffix) != configsOrigin {
 		return errWorkspaceSource
 	}
 
@@ -258,7 +272,7 @@ func (client apiClient) authorize(ctx context.Context, req *http.Request) error 
 		return errOIDC
 	}
 
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(authorizationHeader, bearerPrefix+token)
 
 	return nil
 }

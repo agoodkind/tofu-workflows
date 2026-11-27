@@ -16,6 +16,23 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/server"
 )
 
+const (
+	queueTestRoot             = "opentofu/qa"
+	queueTestBranch           = "terrakube/tack-qa"
+	queueTestRootHCL          = "opentofu/qa/main.tf"
+	queueTestSharedHCL        = "opentofu/modules/shared/main.tf"
+	queueTestExternalHCL      = "external/module/main.tf"
+	queueTestServicesHCL      = "opentofu/qa/ndppd.tf"
+	queueTestUnrelatedHCL     = "opentofu/modules/unrelated/main.tf"
+	queueTestSharedFile       = "opentofu/modules/shared/config"
+	queueTestLocalFile        = "opentofu/qa/input"
+	queueTestServiceFile      = "opentofu/modules/docker-guest/files/ndppd.service"
+	queueTestTemplateFile     = "opentofu/modules/docker-guest/files/ndppd.conf.tftpl"
+	queueTestExternalFile     = "external/module/config"
+	queueTestPromotionRefSpec = "refs/heads/main:refs/heads/terrakube/tack-qa"
+	queueTestMainRefSpec      = "refs/heads/main:refs/heads/main"
+)
+
 func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 	remote := t.TempDir()
 	local := t.TempDir()
@@ -63,8 +80,8 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 
 	src := gitSource{
 		Directory:        local,
-		Root:             "opentofu/qa",
-		Branch:           "terrakube/tack-qa",
+		Root:             queueTestRoot,
+		Branch:           queueTestBranch,
 		allowLocalRemote: true,
 	}
 	write := func(name, body string) {
@@ -99,14 +116,11 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 
 		return hash.String()
 	}
-	write("opentofu/qa/main.tf", `module "shared" { source = "../modules/shared" }`)
+	write(queueTestRootHCL, `module "shared" { source = "../modules/shared" }`)
+	write(queueTestSharedHCL, `module "external" { source = "../../../external/module" }`)
+	write(queueTestExternalHCL, "")
 	write(
-		"opentofu/modules/shared/main.tf",
-		`module "external" { source = "../../../external/module" }`,
-	)
-	write("external/module/main.tf", "")
-	write(
-		"opentofu/qa/ndppd.tf",
+		queueTestServicesHCL,
 		`locals {
  service = file("${path.module}/../modules/docker-guest/files/ndppd.service")
  config = templatefile("${path.module}/../modules/docker-guest/files/ndppd.conf.tftpl", {})
@@ -117,26 +131,25 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		`{"version":1,"apps":[{"name":"first","repository":"org/first","deployments":[{"name":"qa","root":"opentofu/qa","promotion_branch":"terrakube/qa","environment":"qa","enabled":false,"shared_inputs":["external/shared"]}]}]}`,
 	)
 	base := commit()
-	push("refs/heads/main:refs/heads/terrakube/tack-qa")
-	write("opentofu/modules/unrelated/main.tf", "")
+	push(queueTestPromotionRefSpec)
+	write(queueTestUnrelatedHCL, "")
 	commit()
-	write("opentofu/modules/shared/config", "first")
+	write(queueTestSharedFile, "first")
 	first := commit()
-	write("opentofu/qa/input", "second")
+	write(queueTestLocalFile, "second")
 	second := commit()
-	patch := "opentofu/modules/docker-guest/files/ndppd.service"
-	write(patch, "service")
+	write(queueTestServiceFile, "service")
 	service := commit()
-	write("opentofu/modules/docker-guest/files/ndppd.conf.tftpl", "config")
+	write(queueTestTemplateFile, "config")
 	config := commit()
-	if _, err := worktree.Remove(patch); err != nil {
+	if _, err := worktree.Remove(queueTestServiceFile); err != nil {
 		t.Fatal(err)
 	}
 
 	removed := commit()
-	write("external/module/config", "new")
+	write(queueTestExternalFile, "new")
 	external := commit()
-	push("refs/heads/main:refs/heads/main")
+	push(queueTestMainRefSpec)
 	write(registryPath, "this unreviewed worktree content must not become deployment input")
 	entries, err := readTargets(t.Context(), local)
 	if err != nil || len(entries) != 1 || entries[0].Name != "qa" || *entries[0].Enabled {

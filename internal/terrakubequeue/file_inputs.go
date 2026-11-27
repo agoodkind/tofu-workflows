@@ -10,7 +10,24 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
-const pathTraversalLength = 2
+const (
+	pathTraversalLength          = 2
+	fileFunctionName             = "file"
+	templateFileFunctionName     = "templatefile"
+	fileExistsFunctionName       = "fileexists"
+	fileSetFunctionName          = "fileset"
+	fileBase64FunctionName       = "filebase64"
+	fileMD5FunctionName          = "filemd5"
+	fileSHA1FunctionName         = "filesha1"
+	fileSHA256FunctionName       = "filesha256"
+	fileSHA512FunctionName       = "filesha512"
+	fileBase64SHA256FunctionName = "filebase64sha256"
+	fileBase64SHA512FunctionName = "filebase64sha512"
+	pathObjectName               = "path"
+	pathModuleField              = "module"
+	pathRootField                = "root"
+	pathWorkingDirectoryField    = "cwd"
+)
 
 // fileInputs also reads path expressions assigned to locals. A dynamic file
 // name depends on the static directory before the interpolation.
@@ -19,7 +36,7 @@ func fileInputs(file *hcl.File, dir, root string) ([]string, error) {
 	if !ok {
 		// JSON configurations may contain expression strings anywhere in an object.
 		// Treat the whole repository as an input until those expressions can be resolved.
-		return []string{"."}, nil
+		return []string{repoRootPath}, nil
 	}
 
 	var inputs []string
@@ -54,17 +71,17 @@ func fileInputs(file *hcl.File, dir, root string) ([]string, error) {
 func fileFunction(name string) bool {
 	return slices.Contains(
 		[]string{
-			"file",
-			"templatefile",
-			"fileexists",
-			"fileset",
-			"filebase64",
-			"filemd5",
-			"filesha1",
-			"filesha256",
-			"filesha512",
-			"filebase64sha256",
-			"filebase64sha512",
+			fileFunctionName,
+			templateFileFunctionName,
+			fileExistsFunctionName,
+			fileSetFunctionName,
+			fileBase64FunctionName,
+			fileMD5FunctionName,
+			fileSHA1FunctionName,
+			fileSHA256FunctionName,
+			fileSHA512FunctionName,
+			fileBase64SHA256FunctionName,
+			fileBase64SHA512FunctionName,
 		},
 		name,
 	)
@@ -76,7 +93,8 @@ func templatePath(expr *hclsyntax.TemplateExpr, dir, root string) (string, bool)
 	}
 
 	traversal, diag := hcl.AbsTraversalForExpr(expr.Parts[0])
-	if diag.HasErrors() || len(traversal) != pathTraversalLength || traversal.RootName() != "path" {
+	if diag.HasErrors() || len(traversal) != pathTraversalLength ||
+		traversal.RootName() != pathObjectName {
 		return "", false
 	}
 
@@ -85,7 +103,11 @@ func templatePath(expr *hclsyntax.TemplateExpr, dir, root string) (string, bool)
 		return "", false
 	}
 
-	base, supported := map[string]string{"module": dir, "root": root, "cwd": root}[field.Name]
+	base, supported := map[string]string{
+		pathModuleField:           dir,
+		pathRootField:             root,
+		pathWorkingDirectoryField: root,
+	}[field.Name]
 	if !supported {
 		return "", false
 	}
@@ -96,7 +118,7 @@ func templatePath(expr *hclsyntax.TemplateExpr, dir, root string) (string, bool)
 		literal, ok := part.(*hclsyntax.LiteralValueExpr)
 		if !ok || !literal.Val.Type().Equals(cty.String) {
 			prefix := suffix.String()
-			if !strings.HasSuffix(prefix, "/") {
+			if !strings.HasSuffix(prefix, repoPathSeparator) {
 				prefix = path.Dir(prefix)
 			}
 

@@ -10,15 +10,35 @@ import (
 	"slices"
 	"strings"
 
+	git "github.com/go-git/go-git/v5"
 	strictjson "sigs.k8s.io/json"
 )
 
-const registryPath = ".github/terrakube/enrollments.json"
+const (
+	registryVersion        = 1
+	registryPath           = ".github/terrakube/enrollments.json"
+	appSlugPattern         = "^[a-z0-9]+(-[a-z0-9]+)*$"
+	repositoryNamePattern  = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+	repositoryPathPattern  = "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+	repoRootPath           = "."
+	repoPathSeparator      = "/"
+	parentPathComponent    = ".."
+	openTofuRootPrefix     = "opentofu/"
+	promotionBranchPrefix  = "terrakube/"
+	appIndexPrefix         = "app:"
+	repositoryIndexPrefix  = "repo:"
+	targetNameIndexPrefix  = "name:"
+	branchIndexPrefix      = "branch:"
+	environmentIndexPrefix = "env:"
+	workflowsDirectory     = ".github/workflows"
+	ymlExtension           = ".yml"
+	yamlExtension          = ".yaml"
+)
 
 var (
-	slug        = regexp.MustCompile("^[a-z0-9]+(-[a-z0-9]+)*$")
-	repoName    = regexp.MustCompile("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
-	repoPath    = regexp.MustCompile("^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$")
+	slug        = regexp.MustCompile(appSlugPattern)
+	repoName    = regexp.MustCompile(repositoryNamePattern)
+	repoPath    = regexp.MustCompile(repositoryPathPattern)
 	errRegistry = errors.New("invalid Terrakube enrollment")
 	errDisabled = errors.New("deployment is disabled or its protected environment changed")
 )
@@ -48,9 +68,13 @@ type target struct {
 }
 
 func validRepoPath(value string) bool {
-	return repoPath.MatchString(value) && path.Clean(value) == value && value != "." &&
-		!slices.Contains(strings.Split(strings.ToLower(value), "/"), "..") &&
-		!slices.Contains(strings.Split(strings.ToLower(value), "/"), ".git")
+	components := strings.Split(strings.ToLower(value), repoPathSeparator)
+
+	return repoPath.MatchString(value) && path.Clean(value) == value && value != repoRootPath &&
+		!slices.Contains(
+			components,
+			parentPathComponent,
+		) && !slices.Contains(components, git.GitDirName)
 }
 
 func (entry target) valid() bool {
@@ -60,11 +84,11 @@ func (entry target) valid() bool {
 		return false
 	}
 
-	if !validRepoPath(entry.Root) || !strings.HasPrefix(entry.Root, "opentofu/") {
+	if !validRepoPath(entry.Root) || !strings.HasPrefix(entry.Root, openTofuRootPrefix) {
 		return false
 	}
 
-	branch, ok := strings.CutPrefix(entry.Branch, "terrakube/")
+	branch, ok := strings.CutPrefix(entry.Branch, promotionBranchPrefix)
 	if !ok || !slug.MatchString(branch) {
 		return false
 	}
@@ -83,7 +107,7 @@ func (entry target) valid() bool {
 }
 
 func (catalog registry) targets() ([]target, error) {
-	if catalog.Version != 1 || catalog.Apps == nil {
+	if catalog.Version != registryVersion || catalog.Apps == nil {
 		return nil, errRegistry
 	}
 
@@ -93,8 +117,9 @@ func (catalog registry) targets() ([]target, error) {
 
 	for _, app := range catalog.Apps {
 		repo := strings.ToLower(app.Repository)
-		if !slug.MatchString(app.Name) || !repoName.MatchString(repo) || used["app:"+app.Name] ||
-			used["repo:"+repo] ||
+		if !slug.MatchString(app.Name) || !repoName.MatchString(repo) ||
+			used[appIndexPrefix+app.Name] ||
+			used[repositoryIndexPrefix+repo] ||
 			len(app.Deployments) == 0 {
 			return nil, errRegistry
 		}
@@ -103,12 +128,13 @@ func (catalog registry) targets() ([]target, error) {
 			return nil, errRegistry
 		}
 
-		used["app:"+app.Name] = true
-		used["repo:"+repo] = true
+		used[appIndexPrefix+app.Name] = true
+		used[repositoryIndexPrefix+repo] = true
 
 		for _, entry := range app.Deployments {
-			if !entry.valid() || used["name:"+entry.Name] || used["branch:"+entry.Branch] ||
-				used["env:"+entry.Environment] {
+			if !entry.valid() || used[targetNameIndexPrefix+entry.Name] ||
+				used[branchIndexPrefix+entry.Branch] ||
+				used[environmentIndexPrefix+entry.Environment] {
 				return nil, errRegistry
 			}
 
@@ -118,9 +144,9 @@ func (catalog registry) targets() ([]target, error) {
 				}
 			}
 
-			used["name:"+entry.Name] = true
-			used["branch:"+entry.Branch] = true
-			used["env:"+entry.Environment] = true
+			used[targetNameIndexPrefix+entry.Name] = true
+			used[branchIndexPrefix+entry.Branch] = true
+			used[environmentIndexPrefix+entry.Environment] = true
 			roots = append(roots, entry.Root)
 			result = append(result, entry)
 		}
@@ -136,8 +162,8 @@ func (catalog registry) targets() ([]target, error) {
 func (release releaseAdapter) valid() bool {
 	return slug.MatchString(release.Adapter) && validRepoPath(release.SourceBranch) &&
 		validRepoPath(release.Workflow) &&
-		path.Dir(release.Workflow) == ".github/workflows" &&
-		slices.Contains([]string{".yml", ".yaml"}, path.Ext(release.Workflow))
+		path.Dir(release.Workflow) == workflowsDirectory &&
+		slices.Contains([]string{ymlExtension, yamlExtension}, path.Ext(release.Workflow))
 }
 
 func independentRoots(entries []target, roots []string) bool {
@@ -155,7 +181,8 @@ func independentRoots(entries []target, roots []string) bool {
 }
 
 func overlaps(left, right string) bool {
-	return left == right || strings.HasPrefix(left, right+"/") || strings.HasPrefix(right, left+"/")
+	return left == right || strings.HasPrefix(left, right+repoPathSeparator) ||
+		strings.HasPrefix(right, left+repoPathSeparator)
 }
 
 func readTargets(ctx context.Context, checkout string) ([]target, error) {

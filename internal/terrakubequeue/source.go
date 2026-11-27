@@ -20,12 +20,17 @@ import (
 )
 
 const (
-	shaBytes      = 20
-	originMain    = "refs/remotes/origin/main"
-	configsOrigin = "https://github.com/agoodkind/configs"
+	commitSHAPattern    = "^[0-9a-f]{40}$"
+	promotionTokenEnv   = "PROMOTION_GITHUB_TOKEN"
+	githubAppUser       = "x-access-token"
+	refSpecSeparator    = ":"
+	shaBytes            = 20
+	originMain          = "refs/remotes/origin/main"
+	configsOrigin       = "https://github.com/agoodkind/configs"
+	gitRepositorySuffix = ".git"
 )
 
-var revision = regexp.MustCompile("^[0-9a-f]{40}$")
+var revision = regexp.MustCompile(commitSHAPattern)
 
 // gitSource reads main and the promotion refs in the Configs checkout.
 type gitSource struct {
@@ -90,7 +95,10 @@ func (g gitSource) promotion(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	commit, err := commitAtRef(repo, plumbing.NewRemoteReferenceName("origin", g.Branch))
+	commit, err := commitAtRef(
+		repo,
+		plumbing.NewRemoteReferenceName(git.DefaultRemoteName, g.Branch),
+	)
 	if err != nil {
 		return "", err
 	}
@@ -173,7 +181,7 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 		return err
 	}
 
-	remote, err := repo.Remote("origin")
+	remote, err := repo.Remote(git.DefaultRemoteName)
 	if err != nil {
 		return fmt.Errorf("read origin in %s: %w", g.Directory, err)
 	}
@@ -189,22 +197,24 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 	}
 
 	options := &git.PushOptions{
-		RemoteName:        "origin",
-		RemoteURL:         urls[0],
-		RefSpecs:          []config.RefSpec{config.RefSpec(next + ":" + ref.String())},
-		RequireRemoteRefs: []config.RefSpec{config.RefSpec(current + ":" + ref.String())},
+		RemoteName: git.DefaultRemoteName,
+		RemoteURL:  urls[0],
+		RefSpecs:   []config.RefSpec{config.RefSpec(next + refSpecSeparator + ref.String())},
+		RequireRemoteRefs: []config.RefSpec{
+			config.RefSpec(current + refSpecSeparator + ref.String()),
+		},
 	}
 	if !g.allowLocalRemote || !filepath.IsAbs(urls[0]) {
-		if urls[0] != configsOrigin && urls[0] != configsOrigin+".git" {
+		if urls[0] != configsOrigin && urls[0] != configsOrigin+gitRepositorySuffix {
 			return fmt.Errorf("%w: unexpected Configs origin", errQueue)
 		}
 
-		token := os.Getenv("PROMOTION_GITHUB_TOKEN")
+		token := os.Getenv(promotionTokenEnv)
 		if token == "" {
-			return fmt.Errorf("%w: PROMOTION_GITHUB_TOKEN is required", errQueue)
+			return fmt.Errorf("%w: %s is required", errQueue, promotionTokenEnv)
 		}
 
-		options.Auth = &githttp.BasicAuth{Username: "x-access-token", Password: token}
+		options.Auth = &githttp.BasicAuth{Username: githubAppUser, Password: token}
 	}
 
 	// RequireRemoteRefs checks the advertised commit. Receive-pack also compares
@@ -221,7 +231,11 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 func affects(files, dirs []string) bool {
 	for _, file := range files {
 		for _, dir := range dirs {
-			if file != "" && (dir == "." || file == dir || strings.HasPrefix(file, dir+"/")) {
+			if file != "" &&
+				(dir == repoRootPath || file == dir || strings.HasPrefix(
+					file,
+					dir+repoPathSeparator,
+				)) {
 				return true
 			}
 		}

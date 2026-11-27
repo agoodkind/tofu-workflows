@@ -11,6 +11,10 @@ import (
 )
 
 const (
+	receiptTestAPIURL         = "https://example.invalid/api/v1"
+	receiptTestJobsPath       = "/api/v1/organization/" + receiptTestOrganizationID + "/job"
+	receiptTestStepsPath      = receiptTestJobsPath + "/19/step"
+	receiptTestOutputPath     = "/tfoutput/v1/organization/" + receiptTestOrganizationID + "/job/19/step/" + receiptTestStepID
 	receiptTestStepID         = "00000000-0000-4000-8000-000000000004"
 	receiptTestWorkspaceID    = "00000000-0000-4000-8000-000000000002"
 	receiptTestOrganizationID = "00000000-0000-4000-8000-000000000001"
@@ -62,7 +66,7 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 				issuedTokens := 0
 				requests := 0
 				client := apiClient{
-					BaseURL:      "https://example.invalid/api/v1",
+					BaseURL:      receiptTestAPIURL,
 					Organization: receiptTestOrganizationID,
 					Workspace:    receiptTestWorkspaceID,
 					Template:     receiptTestStepID,
@@ -92,8 +96,8 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 						var body string
 						headers := http.Header{}
 						switch req.URL.Path {
-						case "/api/v1/organization/" + receiptTestOrganizationID + "/job":
-							if req.Method == "POST" {
+						case receiptTestJobsPath:
+							if req.Method == http.MethodPost {
 								jobs++
 								body = `{"data":{"id":"20","type":"job"}}`
 
@@ -101,9 +105,9 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 							}
 
 							body = `{"data":[{"type":"job","id":"19","attributes":{"status":"failed","comments":"configs-main-` + receiptTestCommit + `","commitId":"` + receiptTestCommit + `","templateReference":"` + receiptTestStepID + `"},"relationships":{"workspace":{"data":{"id":"` + receiptTestWorkspaceID + `","type":"workspace"}}}}]}`
-						case "/api/v1/organization/" + receiptTestOrganizationID + "/job/19/step":
+						case receiptTestStepsPath:
 							body = `{"data":[{"id":"` + receiptTestStepID + `","type":"step","attributes":{"status":"failed"}}]}`
-						case "/tfoutput/v1/organization/" + receiptTestOrganizationID + "/job/19/step/" + receiptTestStepID:
+						case receiptTestOutputPath:
 							body = tc.output
 							if tc.incomplete {
 								headers.Set("X-Terrakube-Output-Incomplete", "true")

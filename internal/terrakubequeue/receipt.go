@@ -15,8 +15,16 @@ import (
 )
 
 const (
-	receiptPrefix        = "CONFIGS_TERRAKUBE_DEPLOYMENT_RESULT "
-	receiptMaxLineLength = 4 << 20
+	receiptVersion         = 1
+	stepType               = "step"
+	jobStepsPathFormat     = jobAPIPath + "/%s/step"
+	stepOutputPathFormat   = "/tfoutput/v1/organization/%s/job/%s/step/%s"
+	contentRangeHeader     = "Content-Range"
+	outputIncompleteHeader = "X-Terrakube-Output-Incomplete"
+	incompleteOutputValue  = "true"
+	planFailedOutcome      = "plan_failed"
+	receiptPrefix          = "CONFIGS_TERRAKUBE_DEPLOYMENT_RESULT "
+	receiptMaxLineLength   = 4 << 20
 )
 
 type deploymentReceipt struct {
@@ -38,7 +46,7 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 		ctx,
 		client,
 		http.MethodGet,
-		"/job/"+job.ID+"/step",
+		fmt.Sprintf(jobStepsPathFormat, job.ID),
 		nil,
 		&steps,
 	); err != nil {
@@ -50,7 +58,8 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 	}
 
 	step := steps.Data[0]
-	if step.Type != "step" || !isCanonicalUUID(step.ID) || step.Attributes.Status != statusFailed {
+	if step.Type != stepType || !isCanonicalUUID(step.ID) ||
+		step.Attributes.Status != statusFailed {
 		return errReconcileApply
 	}
 
@@ -59,7 +68,7 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 		return fmt.Errorf("parse job log origin: %w", err)
 	}
 
-	endpoint.Path = "/tfoutput/v1/organization/" + client.Organization + "/job/" + job.ID + "/step/" + step.ID
+	endpoint.Path = fmt.Sprintf(stepOutputPathFormat, client.Organization, job.ID, step.ID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
 		return fmt.Errorf("prepare job log request: %w", err)
@@ -76,14 +85,14 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 		return fmt.Errorf("read job log: %w", err)
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK || res.Header.Get("Content-Range") != "" ||
-		strings.EqualFold(res.Header.Get("X-Terrakube-Output-Incomplete"), "true") {
+	if res.StatusCode != http.StatusOK || res.Header.Get(contentRangeHeader) != "" ||
+		strings.EqualFold(res.Header.Get(outputIncompleteHeader), incompleteOutputValue) {
 		return errReconcileApply
 	}
 
 	expected := deploymentReceipt{
-		Version:     1,
-		Outcome:     "plan_failed",
+		Version:     receiptVersion,
+		Outcome:     planFailedOutcome,
 		JobID:       job.ID,
 		WorkspaceID: client.Workspace,
 		CommitID:    job.Commit,

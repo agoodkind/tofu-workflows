@@ -14,8 +14,16 @@ import (
 )
 
 const (
-	matrixMode   queueCommand = "matrix"
-	affectedMode queueCommand = "affected"
+	promotionEnvironmentEnv              = "PROMOTION_ENVIRONMENT"
+	baselineSHAEnv                       = "TERRAKUBE_BASELINE_SHA"
+	apiURLEnv                            = "TERRAKUBE_API_URL"
+	organizationIDEnv                    = "TERRAKUBE_ORGANIZATION_ID"
+	workspaceIDEnv                       = "TERRAKUBE_WORKSPACE_ID"
+	templateIDEnv                        = "TERRAKUBE_TEMPLATE_ID"
+	matrixDeploy                         = "deploy"
+	matrixPreview                        = "preview"
+	matrixMode              queueCommand = "matrix"
+	affectedMode            queueCommand = "affected"
 )
 
 const (
@@ -71,11 +79,11 @@ func runDeployment(ctx context.Context, args []string, entries []target) error {
 	}
 
 	if selected.Enabled == nil || !*selected.Enabled ||
-		selected.Environment != os.Getenv("PROMOTION_ENVIRONMENT") {
+		selected.Environment != os.Getenv(promotionEnvironmentEnv) {
 		return errDisabled
 	}
 
-	baseline := os.Getenv("TERRAKUBE_BASELINE_SHA")
+	baseline := os.Getenv(baselineSHAEnv)
 	if !revision.MatchString(baseline) {
 		return errBaseline
 	}
@@ -91,10 +99,10 @@ func runDeployment(ctx context.Context, args []string, entries []target) error {
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	api := apiClient{
-		BaseURL:      os.Getenv("TERRAKUBE_API_URL"),
-		Organization: os.Getenv("TERRAKUBE_ORGANIZATION_ID"),
-		Workspace:    os.Getenv("TERRAKUBE_WORKSPACE_ID"),
-		Template:     os.Getenv("TERRAKUBE_TEMPLATE_ID"),
+		BaseURL:      os.Getenv(apiURLEnv),
+		Organization: os.Getenv(organizationIDEnv),
+		Workspace:    os.Getenv(workspaceIDEnv),
+		Template:     os.Getenv(templateIDEnv),
 		Token:        githubactions.GetIDToken,
 		Client:       client,
 	}
@@ -115,9 +123,7 @@ var (
 	)
 	errUsage         = errors.New("usage: terrakube-queue DEPLOYMENT CONFIGS_CHECKOUT")
 	errWorkspaceName = errors.New("workspace is not enrolled in reviewed Configs main")
-	errBaseline      = errors.New(
-		"TERRAKUBE_BASELINE_SHA must be the full initial promotion commit",
-	)
+	errBaseline      = errors.New(baselineSHAEnv + " must be the full initial promotion commit")
 )
 
 // Main runs the queue command and returns its process status.
@@ -192,14 +198,14 @@ func affectedCommand(ctx context.Context, args []string, entries []target) error
 }
 
 func matrixCommand(args []string, entries []target) error {
-	if len(args) != matrixArgumentCount || (args[3] != "deploy" && args[3] != "preview") {
+	if len(args) != matrixArgumentCount || (args[3] != matrixDeploy && args[3] != matrixPreview) {
 		return errUsage
 	}
 
 	selected := []target{}
 
 	for _, entry := range entries {
-		if args[3] == "preview" || *entry.Enabled {
+		if args[3] == matrixPreview || *entry.Enabled {
 			selected = append(selected, entry)
 		}
 	}
