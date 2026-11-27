@@ -50,7 +50,7 @@ type registry struct {
 type application struct {
 	Name        string          `json:"name"`
 	Repository  string          `json:"repository"`
-	Deployments []target        `json:"deployments"`
+	Deployments []Target        `json:"deployments"`
 	Release     *releaseAdapter `json:"release,omitempty"`
 }
 type releaseAdapter struct {
@@ -58,7 +58,9 @@ type releaseAdapter struct {
 	SourceBranch string `json:"source_branch"`
 	Workflow     string `json:"workflow"`
 }
-type target struct {
+
+// Target identifies an enrolled deployment workspace.
+type Target struct {
 	Name        string   `json:"name"`
 	Root        string   `json:"root"`
 	Branch      string   `json:"promotion_branch"`
@@ -77,7 +79,7 @@ func validRepoPath(value string) bool {
 		) && !slices.Contains(components, git.GitDirName)
 }
 
-func (entry target) valid() bool {
+func (entry Target) valid() bool {
 	if !slug.MatchString(entry.Name) || !slug.MatchString(entry.Environment) ||
 		entry.Enabled == nil ||
 		entry.Shared == nil {
@@ -106,13 +108,13 @@ func (entry target) valid() bool {
 	return true
 }
 
-func (catalog registry) targets() ([]target, error) {
+func (catalog registry) targets() ([]Target, error) {
 	if catalog.Version != registryVersion || catalog.Apps == nil {
 		return nil, errRegistry
 	}
 
 	used := map[string]bool{}
-	result := []target{}
+	result := []Target{}
 
 	for _, app := range catalog.Apps {
 		repo := strings.ToLower(app.Repository)
@@ -164,7 +166,7 @@ func (release releaseAdapter) valid() bool {
 		slices.Contains([]string{ymlExtension, yamlExtension}, path.Ext(release.Workflow))
 }
 
-func independentRoots(entries []target) bool {
+func independentRoots(entries []Target) bool {
 	for _, entry := range entries {
 		for _, input := range entry.Shared {
 			for _, other := range entries {
@@ -183,7 +185,7 @@ func overlaps(left, right string) bool {
 		strings.HasPrefix(right, left+repoPathSeparator)
 }
 
-func readTargets(ctx context.Context, checkout string) ([]target, error) {
+func readTargets(ctx context.Context, checkout string) ([]Target, error) {
 	source := gitSource{Directory: checkout}
 	repo, err := source.repository()
 	if err != nil {

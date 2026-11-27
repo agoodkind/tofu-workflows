@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/agoodkind/tofu-workflows/internal/terrakubequeue/reconcile"
 	"github.com/google/uuid"
 )
 
@@ -50,37 +51,20 @@ func isCanonicalUUID(value string) bool {
 	return err == nil && parsed.String() == value
 }
 
-func (client apiClient) validate() error {
-	u, err := url.Parse(client.BaseURL)
-	if err != nil || u.Scheme != httpsScheme || u.Hostname() == "" || u.User != nil ||
-		u.RawQuery != "" ||
-		u.Fragment != "" {
-		return errAPIURL
-	}
-
-	if !isCanonicalUUID(client.Organization) || !isCanonicalUUID(client.Workspace) ||
-		!isCanonicalUUID(client.Template) ||
-		client.Token == nil {
-		return errMissingAPISettings
-	}
-
-	return nil
-}
-
 type identifier struct {
 	Type string `json:"type"`
 	ID   string `json:"id,omitempty"`
 }
 
 type attributes struct {
-	Comments                        string    `json:"comments"`
-	Template                        string    `json:"templateReference"`
-	Status                          jobStatus `json:"status,omitempty"`
-	Source                          string    `json:"source,omitempty"`
-	Branch                          string    `json:"branch,omitempty"`
-	DefaultTemplate                 string    `json:"defaultTemplate,omitempty"`
-	RestrictApplyToConfiguredBranch bool      `json:"restrictApplyToConfiguredBranch,omitempty"`
-	Commit                          string    `json:"commitId,omitempty"`
+	Comments                        string           `json:"comments"`
+	Template                        string           `json:"templateReference"`
+	Status                          reconcile.Status `json:"status,omitempty"`
+	Source                          string           `json:"source,omitempty"`
+	Branch                          string           `json:"branch,omitempty"`
+	DefaultTemplate                 string           `json:"defaultTemplate,omitempty"`
+	RestrictApplyToConfiguredBranch bool             `json:"restrictApplyToConfiguredBranch,omitempty"`
+	Commit                          string           `json:"commitId,omitempty"`
 }
 
 type resource struct {
@@ -92,15 +76,6 @@ type resource struct {
 			Data identifier `json:"data"`
 		} `json:"workspace"`
 	} `json:"relationships"`
-}
-
-func (client apiClient) job(sha string) resource {
-	var record resource
-	record.Type = jobType
-	record.Attributes = attributes{Comments: jobCommentPrefix + sha, Template: client.Template}
-	record.Relationships.Workspace.Data = identifier{Type: workspaceType, ID: client.Workspace}
-
-	return record
 }
 
 type envelope[T resource | []resource] struct {
@@ -141,7 +116,12 @@ func request[T resource | []resource](
 	}
 	defer res.Body.Close()
 	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("%w: Terrakube %s job request returned %s", errQueue, method, res.Status)
+		return fmt.Errorf(
+			"%w: Terrakube %s job request returned %s",
+			reconcile.ErrQueue,
+			method,
+			res.Status,
+		)
 	}
 
 	if err := json.NewDecoder(res.Body).Decode(output); err != nil {
@@ -151,7 +131,7 @@ func request[T resource | []resource](
 	return nil
 }
 
-func (client apiClient) submit(ctx context.Context, sha string) (string, error) {
+func (client apiClient) Submit(ctx context.Context, sha string) (string, error) {
 	data, err := json.Marshal(envelope[resource]{Data: client.job(sha)})
 	if err != nil {
 		slog.ErrorContext(ctx, "encode Terrakube job", "error", err)
@@ -178,7 +158,7 @@ func (client apiClient) submit(ctx context.Context, sha string) (string, error) 
 	return response.Data.ID, nil
 }
 
-func (client apiClient) lookup(ctx context.Context, sha string) ([]jobRecord, error) {
+func (client apiClient) Lookup(ctx context.Context, sha string) ([]reconcile.Job, error) {
 	wanted := client.job(sha)
 	query := url.Values{}
 	query.Set(
@@ -197,7 +177,7 @@ func (client apiClient) lookup(ctx context.Context, sha string) ([]jobRecord, er
 		return nil, err
 	}
 
-	var jobs []jobRecord
+	var jobs []reconcile.Job
 
 	for _, record := range response.Data {
 		if record.Type != jobType || record.ID == "" ||
@@ -209,7 +189,7 @@ func (client apiClient) lookup(ctx context.Context, sha string) ([]jobRecord, er
 
 		jobs = append(
 			jobs,
-			jobRecord{
+			reconcile.Job{
 				ID:     record.ID,
 				Status: record.Attributes.Status,
 				Commit: record.Attributes.Commit,
@@ -218,6 +198,32 @@ func (client apiClient) lookup(ctx context.Context, sha string) ([]jobRecord, er
 	}
 
 	return jobs, nil
+}
+
+func (client apiClient) validate() error {
+	u, err := url.Parse(client.BaseURL)
+	if err != nil || u.Scheme != httpsScheme || u.Hostname() == "" || u.User != nil ||
+		u.RawQuery != "" ||
+		u.Fragment != "" {
+		return errAPIURL
+	}
+
+	if !isCanonicalUUID(client.Organization) || !isCanonicalUUID(client.Workspace) ||
+		!isCanonicalUUID(client.Template) ||
+		client.Token == nil {
+		return errMissingAPISettings
+	}
+
+	return nil
+}
+
+func (client apiClient) job(sha string) resource {
+	var record resource
+	record.Type = jobType
+	record.Attributes = attributes{Comments: jobCommentPrefix + sha, Template: client.Template}
+	record.Relationships.Workspace.Data = identifier{Type: workspaceType, ID: client.Workspace}
+
+	return record
 }
 
 func (client apiClient) verifyWorkspace(ctx context.Context, branch, expectedOrigin string) error {

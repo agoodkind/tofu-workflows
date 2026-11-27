@@ -87,18 +87,17 @@ func TestWorkspaceUsesExpectedRepository(t *testing.T) {
 }
 
 func TestDeploymentRejectsInvalidRepositoryBeforeOpeningCheckout(t *testing.T) {
-	t.Setenv(promotionEnvironmentEnv, deploymentName)
+	environment := map[string]string{promotionEnvironmentEnv: deploymentName}
+	service := NewService(Dependencies{
+		Environment: func(key string) string { return environment[key] },
+	})
 	enabled := true
-	entries := []target{{Name: deploymentName, Environment: deploymentName, Enabled: &enabled}}
+	entries := []Target{{Name: deploymentName, Environment: deploymentName, Enabled: &enabled}}
 
 	for _, repository := range []string{"", invalidURL, invalidPath, invalidOwnerAndRepo} {
-		t.Setenv(promotionRepositoryEnv, repository)
+		environment[promotionRepositoryEnv] = repository
 
-		err := runDeployment(
-			t.Context(),
-			[]string{"queue", deploymentName, unusedCheckout},
-			entries,
-		)
+		err := service.deploy(t.Context(), deploymentName, unusedCheckout, entries)
 		if !errors.Is(err, errPromotionRepository) {
 			t.Errorf(
 				"run deployment with repository %q: got %v, want invalid repository error",

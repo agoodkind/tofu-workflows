@@ -8,8 +8,8 @@ import (
 
 func TestEnrollmentRejectsOverlappingDeploymentAuthority(t *testing.T) {
 	enabled := true
-	makeTarget := func(name string) target {
-		return target{
+	makeTarget := func(name string) Target {
+		return Target{
 			Name:        name,
 			Root:        "opentofu/" + name,
 			Branch:      "terrakube/" + name,
@@ -46,11 +46,11 @@ func TestEnrollmentRejectsOverlappingDeploymentAuthority(t *testing.T) {
 				catalog := registry{
 					Version: 1,
 					Apps: []application{
-						{Name: "first", Repository: "org/first", Deployments: []target{first}},
+						{Name: "first", Repository: "org/first", Deployments: []Target{first}},
 						{
 							Name:        "second",
 							Repository:  "org/second",
-							Deployments: []target{makeTarget("second")},
+							Deployments: []Target{makeTarget("second")},
 						},
 					},
 				}

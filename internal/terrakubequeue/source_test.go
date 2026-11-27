@@ -156,10 +156,10 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		t.Fatalf("expected disabled target from reviewed main: %v", err)
 	}
 
-	if err := runDeployment(
+	if err := NewService(Dependencies{}).Deploy(
 		t.Context(),
-		[]string{"queue", "qa", local},
-		entries,
+		"qa",
+		local,
 	); !errors.Is(err, errDisabled) {
 		t.Fatal("disabled target should fail before authorization", err)
 	}
@@ -172,21 +172,21 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		{config, removed},
 		{removed, external},
 	} {
-		next, err := src.nextCommit(t.Context(), pair[0])
+		next, err := src.NextCommit(t.Context(), pair[0])
 		if err != nil || next != pair[1] {
 			t.Fatalf("next %s: %v", next, err)
 		}
 
-		if err := src.promote(t.Context(), pair[0], next); err != nil {
+		if err := src.Promote(t.Context(), pair[0], next); err != nil {
 			t.Fatal(err)
 		}
 
-		if err := src.promote(t.Context(), pair[0], next); err == nil {
+		if err := src.Promote(t.Context(), pair[0], next); err == nil {
 			t.Fatal("a duplicate promotion won the claim")
 		}
 
 		if pair[0] == base {
-			if err := src.promote(t.Context(), base, second); err == nil {
+			if err := src.Promote(t.Context(), base, second); err == nil {
 				t.Fatal("a stale promotion skipped the current commit")
 			}
 		}
@@ -197,7 +197,7 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 		}
 	}
 
-	if next, err := src.nextCommit(t.Context(), external); err != nil || next != "" {
+	if next, err := src.NextCommit(t.Context(), external); err != nil || next != "" {
 		t.Fatalf("caught up %q: %v", next, err)
 	}
 
@@ -212,7 +212,7 @@ func TestGitPromotionClaimsReviewedCommitsInOrder(t *testing.T) {
 	}
 
 	src.expectedOrigin = expectedTestOrigin
-	if err := src.promote(t.Context(), base, first); !errors.Is(err, errPromotionOrigin) {
+	if err := src.Promote(t.Context(), base, first); !errors.Is(err, errPromotionOrigin) {
 		t.Fatalf("expected incompatible Git origin to fail before authentication: %v", err)
 	}
 

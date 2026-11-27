@@ -8,9 +8,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/agoodkind/tofu-workflows/internal/terrakubequeue/reconcile"
 )
 
 const (
+	receiptInitialCommit      = "initial"
+	receiptNextCommit         = "next"
 	receiptTestAPIURL         = "https://example.invalid/api/v1"
 	receiptTestJobsPath       = "/api/v1/organization/" + receiptTestOrganizationID + "/job"
 	receiptTestStepsPath      = receiptTestJobsPath + "/19/step"
@@ -21,6 +25,32 @@ const (
 	receiptTestCommit         = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	receiptTestMarker         = receiptPrefix + `{"version":1,"job_id":"19","workspace_id":"` + receiptTestWorkspaceID + `","commit_id":"` + receiptTestCommit + `","outcome":"plan_failed"}`
 )
+
+type receiptSource struct {
+	current string
+}
+
+func (source *receiptSource) Promotion(context.Context) (string, error) {
+	return source.current, nil
+}
+
+func (source *receiptSource) NextCommit(_ context.Context, current string) (string, error) {
+	if current == receiptNextCommit {
+		return "", nil
+	}
+
+	return receiptNextCommit, nil
+}
+
+func (source *receiptSource) Promote(_ context.Context, current, next string) error {
+	if source.current != current {
+		return errors.New("ref changed")
+	}
+
+	source.current = next
+
+	return nil
+}
 
 type receiptTransport func(*http.Request) (*http.Response, error)
 
@@ -62,7 +92,7 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 		t.Run(
 			tc.name,
 			func(t *testing.T) {
-				source := &state{current: receiptTestCommit, next: "next"}
+				source := &receiptSource{current: receiptTestCommit}
 				issuedTokens := 0
 				requests := 0
 				client := apiClient{
@@ -123,14 +153,14 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 						}, nil
 					}),
 				}
-				_, err := wake(context.Background(), "initial", source, client)
+				_, err := reconcile.Step(t.Context(), receiptInitialCommit, source, client)
 				if tc.advance {
-					if err != nil || jobs != 1 || source.current != "next" {
+					if err != nil || jobs != 1 || source.current != receiptNextCommit {
 						t.Fatalf("expected advancement: %v, %d submissions", err, jobs)
 					}
 				} else if !errors.Is(
 					err,
-					errReconcileApply,
+					reconcile.ErrReconcileApply,
 				) || jobs != 0 || source.current != receiptTestCommit {
 					t.Fatalf("expected reconciliation: %v, %d submissions", err, jobs)
 				}

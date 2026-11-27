@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/agoodkind/tofu-workflows/internal/terrakubequeue/reconcile"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -102,12 +103,12 @@ func resolveLocalModules(ctx context.Context, dir string, modules []string) ([]s
 				"module",
 				module,
 				"err",
-				errQueue,
+				reconcile.ErrQueue,
 			)
 
 			return nil, fmt.Errorf(
 				"%w: module %s resolves outside the deployment repository",
-				errQueue,
+				reconcile.ErrQueue,
 				module,
 			)
 		}
@@ -157,7 +158,7 @@ func moduleSources(name string, contents []byte, dir, root string) ([]string, []
 		if diag.HasErrors() || value.IsNull() || !value.Type().Equals(cty.String) {
 			return nil, nil, fmt.Errorf(
 				"%w: module source in %s must be a literal string",
-				errQueue,
+				reconcile.ErrQueue,
 				name,
 			)
 		}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/agoodkind/tofu-workflows/internal/terrakubequeue/reconcile"
 	"github.com/go-git/go-billy/v5/osfs"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -43,7 +44,7 @@ func (s sharedObjectStorage) Config() (*config.Config, error) {
 	if !extension.HasOption(worktreeConfigExtension) {
 		return nil, fmt.Errorf(
 			"%w: expected extensions.worktreeConfig in common configuration",
-			errQueue,
+			reconcile.ErrQueue,
 		)
 	}
 
@@ -70,7 +71,7 @@ func openSharedObjects(checkout string) (*git.Repository, error) {
 			gitDirectoryPrefix,
 		)
 		if !ok || path == "" {
-			return nil, fmt.Errorf("%w: invalid gitdir in %s", errQueue, dot)
+			return nil, fmt.Errorf("%w: invalid gitdir in %s", reconcile.ErrQueue, dot)
 		}
 
 		dot = resolveGitPath(checkout, path)

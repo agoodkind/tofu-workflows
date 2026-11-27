@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/agoodkind/tofu-workflows/internal/terrakubequeue/reconcile"
 	strictjson "sigs.k8s.io/json"
 )
 
@@ -36,7 +37,7 @@ type deploymentReceipt struct {
 	Outcome     string `json:"outcome"`
 }
 
-func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) error {
+func (client apiClient) VerifyFailedPlan(ctx context.Context, job reconcile.Job) error {
 	number, err := strconv.ParseUint(job.ID, 10, 64)
 	if err != nil || number == 0 || strconv.FormatUint(number, 10) != job.ID {
 		return errUnexpectedJob
@@ -55,13 +56,13 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 	}
 
 	if len(steps.Data) != 1 {
-		return errReconcileApply
+		return reconcile.ErrReconcileApply
 	}
 
 	step := steps.Data[0]
 	if step.Type != stepType || !isCanonicalUUID(step.ID) ||
-		step.Attributes.Status != statusFailed {
-		return errReconcileApply
+		step.Attributes.Status != reconcile.StatusFailed {
+		return reconcile.ErrReconcileApply
 	}
 
 	endpoint, err := url.Parse(client.BaseURL)
@@ -88,7 +89,7 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK || res.Header.Get(contentRangeHeader) != "" ||
 		strings.EqualFold(res.Header.Get(outputIncompleteHeader), incompleteOutputValue) {
-		return errReconcileApply
+		return reconcile.ErrReconcileApply
 	}
 
 	expected := deploymentReceipt{
@@ -116,13 +117,13 @@ func readReceipt(log io.Reader, expected deploymentReceipt) error {
 		}
 
 		if found {
-			return errReconcileApply
+			return reconcile.ErrReconcileApply
 		}
 
 		var actual deploymentReceipt
 		problems, err := strictjson.UnmarshalStrict(payload, &actual)
 		if err != nil || len(problems) != 0 || actual != expected {
-			return errReconcileApply
+			return reconcile.ErrReconcileApply
 		}
 
 		found = true
@@ -135,7 +136,7 @@ func readReceipt(log io.Reader, expected deploymentReceipt) error {
 	}
 
 	if !found {
-		return errReconcileApply
+		return reconcile.ErrReconcileApply
 	}
 
 	return nil

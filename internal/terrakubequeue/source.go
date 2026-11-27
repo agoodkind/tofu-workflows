@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/agoodkind/tofu-workflows/internal/input"
+	"github.com/agoodkind/tofu-workflows/internal/terrakubequeue/reconcile"
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -35,33 +35,8 @@ type gitSource struct {
 	Root             string
 	Shared           []string
 	expectedOrigin   string
+	promotionToken   func() string
 	allowLocalRemote bool
-}
-
-func (g gitSource) repository() (*git.Repository, error) {
-	return g.openCheckout(true)
-}
-
-func (g gitSource) openCheckout(sharedObjectsOnly bool) (*git.Repository, error) {
-	repo, err := git.PlainOpenWithOptions(
-		g.Directory,
-		&git.PlainOpenOptions{EnableDotGitCommonDir: true},
-	)
-	if sharedObjectsOnly &&
-		(errors.Is(
-			err,
-			git.ErrUnsupportedExtensionRepositoryFormatVersion,
-		) || errors.Is(err, git.ErrUnknownExtension)) {
-		return openSharedObjects(g.Directory)
-	}
-
-	if err != nil {
-		slog.Error("open Git checkout", "directory", g.Directory, "err", err)
-
-		return nil, fmt.Errorf("open Git checkout %s: %w", g.Directory, err)
-	}
-
-	return repo, nil
 }
 
 func commitAtRef(repo *git.Repository, name plumbing.ReferenceName) (*object.Commit, error) {
@@ -80,7 +55,7 @@ func commitAtRef(repo *git.Repository, name plumbing.ReferenceName) (*object.Com
 	return commit, nil
 }
 
-func (g gitSource) promotion(ctx context.Context) (string, error) {
+func (g gitSource) Promotion(ctx context.Context) (string, error) {
 	if err := ctx.Err(); err != nil {
 		slog.WarnContext(ctx, "read promotion cancelled", "err", err)
 
@@ -103,7 +78,7 @@ func (g gitSource) promotion(ctx context.Context) (string, error) {
 	return commit.Hash.String(), nil
 }
 
-func (g gitSource) nextCommit(ctx context.Context, current string) (string, error) {
+func (g gitSource) NextCommit(ctx context.Context, current string) (string, error) {
 	if !isCanonicalCommit(current) {
 		return "", errCursor
 	}
@@ -132,12 +107,12 @@ func (g gitSource) nextCommit(ctx context.Context, current string) (string, erro
 				"commit",
 				current,
 				"err",
-				errQueue,
+				reconcile.ErrQueue,
 			)
 
 			return "", fmt.Errorf(
 				"%w: promotion %s is outside main's first-parent history",
-				errQueue,
+				reconcile.ErrQueue,
 				current,
 			)
 		}
@@ -168,7 +143,7 @@ func (g gitSource) nextCommit(ctx context.Context, current string) (string, erro
 	return "", nil
 }
 
-func (g gitSource) promote(ctx context.Context, current, next string) error {
+func (g gitSource) Promote(ctx context.Context, current, next string) error {
 	if !isCanonicalCommit(current) || !isCanonicalCommit(next) {
 		return errRevision
 	}
@@ -185,7 +160,7 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 
 	urls := remote.Config().URLs
 	if len(urls) != 1 {
-		return fmt.Errorf("%w: expected a single Git origin", errQueue)
+		return fmt.Errorf("%w: expected a single Git origin", reconcile.ErrQueue)
 	}
 
 	ref := plumbing.NewBranchReferenceName(g.Branch)
@@ -206,9 +181,9 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 			return errPromotionOrigin
 		}
 
-		token := os.Getenv(promotionTokenEnv)
+		token := g.promotionToken()
 		if token == "" {
-			return fmt.Errorf("%w: %s is required", errQueue, promotionTokenEnv)
+			return fmt.Errorf("%w: %s is required", reconcile.ErrQueue, promotionTokenEnv)
 		}
 
 		options.Auth = &githttp.BasicAuth{Username: githubAppUser, Password: token}
@@ -224,6 +199,32 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 	}
 
 	return nil
+}
+
+func (g gitSource) repository() (*git.Repository, error) {
+	return g.openCheckout(true)
+}
+
+func (g gitSource) openCheckout(sharedObjectsOnly bool) (*git.Repository, error) {
+	repo, err := git.PlainOpenWithOptions(
+		g.Directory,
+		&git.PlainOpenOptions{EnableDotGitCommonDir: true},
+	)
+	if sharedObjectsOnly &&
+		(errors.Is(
+			err,
+			git.ErrUnsupportedExtensionRepositoryFormatVersion,
+		) || errors.Is(err, git.ErrUnknownExtension)) {
+		return openSharedObjects(g.Directory)
+	}
+
+	if err != nil {
+		slog.Error("open Git checkout", "directory", g.Directory, "err", err)
+
+		return nil, fmt.Errorf("open Git checkout %s: %w", g.Directory, err)
+	}
+
+	return repo, nil
 }
 
 func affects(files, dirs []string) bool {
@@ -247,7 +248,7 @@ var (
 	errRevision        = errors.New("promotion requires full commit IDs")
 	errPromotionOrigin = fmt.Errorf(
 		"%w: Git origin does not match the GitHub repository selected by the deployment job",
-		errQueue,
+		reconcile.ErrQueue,
 	)
 )
 
