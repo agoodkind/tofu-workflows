@@ -10,8 +10,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -28,7 +29,11 @@ type apiClient struct {
 	Client       *http.Client
 }
 
-var uuid = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+func isCanonicalUUID(value string) bool {
+	parsed, err := uuid.Parse(value)
+
+	return err == nil && parsed.String() == value
+}
 
 func (client apiClient) validate() error {
 	u, err := url.Parse(client.BaseURL)
@@ -38,8 +43,8 @@ func (client apiClient) validate() error {
 		return errAPIURL
 	}
 
-	if !uuid.MatchString(client.Organization) || !uuid.MatchString(client.Workspace) ||
-		!uuid.MatchString(client.Template) ||
+	if !isCanonicalUUID(client.Organization) || !isCanonicalUUID(client.Workspace) ||
+		!isCanonicalUUID(client.Template) ||
 		client.Token == nil {
 		return errMissingAPISettings
 	}

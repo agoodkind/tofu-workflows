@@ -47,7 +47,7 @@ func (client apiClient) verifyFailedPlan(ctx context.Context, job jobRecord) err
 	}
 
 	step := steps.Data[0]
-	if step.Type != "step" || !uuid.MatchString(step.ID) || step.Attributes.Status != statusFailed {
+	if step.Type != "step" || !isCanonicalUUID(step.ID) || step.Attributes.Status != statusFailed {
 		return errReconcileApply
 	}
 

@@ -5,6 +5,7 @@ go 1.27.3
 require (
 	github.com/distribution/reference v0.6.0
 	github.com/google/go-github/v93 v93.0.0
+	github.com/google/uuid v1.6.0
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/hashicorp/terraform-json v0.29.0
 	github.com/sethvargo/go-githubactions v1.4.0
