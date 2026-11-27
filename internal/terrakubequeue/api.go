@@ -20,7 +20,7 @@ const (
 	jobQueryPrefix      = jobAPIPath + "?"
 	httpsScheme         = "https"
 	workspaceType       = "workspace"
-	jobCommentPrefix    = "configs-main-"
+	jobCommentPrefix    = "deployment-main-"
 	organizationAPIPath = "/organization/"
 	jobAPIPath          = "/job"
 	workspaceAPIPath    = "/workspace/"
@@ -30,7 +30,7 @@ const (
 	contentTypeHeader   = "Content-Type"
 	authorizationHeader = "Authorization"
 	bearerPrefix        = "Bearer "
-	deploymentAudience  = "terrakube-configs-deploy"
+	deploymentAudience  = "terrakube-deploy"
 	mediaType           = "application/vnd.api+json"
 	jobType             = "job"
 )

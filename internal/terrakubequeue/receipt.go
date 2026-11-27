@@ -24,7 +24,7 @@ const (
 	outputIncompleteHeader = "X-Terrakube-Output-Incomplete"
 	incompleteOutputValue  = "true"
 	planFailedOutcome      = "plan_failed"
-	receiptPrefix          = "CONFIGS_TERRAKUBE_DEPLOYMENT_RESULT "
+	receiptPrefix          = "TERRAKUBE_DEPLOYMENT_RESULT "
 	receiptMaxLineLength   = 4 << 20
 )
 

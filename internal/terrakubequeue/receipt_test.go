@@ -104,7 +104,7 @@ func TestFailedJobNeedsOneMatchingReceiptFromItsCompleteStepLog(t *testing.T) {
 								break
 							}
 
-							body = `{"data":[{"type":"job","id":"19","attributes":{"status":"failed","comments":"configs-main-` + receiptTestCommit + `","commitId":"` + receiptTestCommit + `","templateReference":"` + receiptTestStepID + `"},"relationships":{"workspace":{"data":{"id":"` + receiptTestWorkspaceID + `","type":"workspace"}}}}]}`
+							body = `{"data":[{"type":"job","id":"19","attributes":{"status":"failed","comments":"deployment-main-` + receiptTestCommit + `","commitId":"` + receiptTestCommit + `","templateReference":"` + receiptTestStepID + `"},"relationships":{"workspace":{"data":{"id":"` + receiptTestWorkspaceID + `","type":"workspace"}}}}]}`
 						case receiptTestStepsPath:
 							body = `{"data":[{"id":"` + receiptTestStepID + `","type":"step","attributes":{"status":"failed"}}]}`
 						case receiptTestOutputPath:

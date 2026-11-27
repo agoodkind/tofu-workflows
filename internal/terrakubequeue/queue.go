@@ -1,4 +1,4 @@
-// Package terrakubequeue deploys reviewed Configs changes in merge order.
+// Package terrakubequeue deploys reviewed changes in merge order.
 // Each workspace tracks the last commit claimed for deployment on a protected
 // Git branch.
 package terrakubequeue

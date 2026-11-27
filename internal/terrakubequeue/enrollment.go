@@ -208,7 +208,7 @@ func readTargets(ctx context.Context, checkout string) ([]target, error) {
 	var catalog registry
 	issues, decodeErr := strictjson.UnmarshalStrict([]byte(data), &catalog)
 	if err := errors.Join(append(issues, decodeErr)...); err != nil {
-		slog.ErrorContext(ctx, "read Configs enrollments", "err", err)
+		slog.ErrorContext(ctx, "read deployment enrollments", "err", err)
 
 		return nil, fmt.Errorf("decode reviewed enrollments: %w", err)
 	}

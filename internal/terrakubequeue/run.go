@@ -36,7 +36,7 @@ const (
 	requestTimeout = 30 * time.Second
 )
 
-// run reads reviewed workspace settings from Configs main. It lists
+// run reads reviewed workspace settings from main. It lists
 // workspaces, checks whether commits affect a workspace, or submits
 // deployments. Deployment mode reads its settings from the GitHub
 // environment and uses the full history of main and the promotion branch.
@@ -124,10 +124,10 @@ func runDeployment(ctx context.Context, args []string, entries []target) error {
 
 var (
 	errAffectedUsage = errors.New(
-		"usage: terrakube-queue affected CONFIGS_CHECKOUT ROOT BASE_SHA HEAD_SHA",
+		"usage: terrakube-queue affected DEPLOYMENT_CHECKOUT ROOT BASE_SHA HEAD_SHA",
 	)
-	errUsage               = errors.New("usage: terrakube-queue DEPLOYMENT CONFIGS_CHECKOUT")
-	errWorkspaceName       = errors.New("workspace is not enrolled in reviewed Configs main")
+	errUsage               = errors.New("usage: terrakube-queue DEPLOYMENT DEPLOYMENT_CHECKOUT")
+	errWorkspaceName       = errors.New("workspace is not enrolled on the reviewed main branch")
 	errPromotionRepository = errors.New(
 		promotionRepositoryEnv + " must be a GitHub owner/repository name",
 	)
@@ -139,13 +139,13 @@ var (
 // Main runs the Terrakube queue and returns an exit status for the workflow.
 // If processing fails, Main writes the error to the runner log.
 //
-// For example, submit changes for Tack QA from a Configs checkout with the
-// GitHub deployment settings already present in the environment.
+// For example, submit changes for an app's QA workspace with the GitHub
+// deployment settings already present in the environment.
 //
-//	terrakube-queue tack-qa /workspace/configs
+//	terrakube-queue app-qa /workspace/deployment
 func Main() int {
 	if err := run(context.Background(), os.Args); err != nil {
-		slog.Error("Configs queue failed", "error", err)
+		slog.Error("Terrakube queue failed", "error", err)
 
 		return 1
 	}

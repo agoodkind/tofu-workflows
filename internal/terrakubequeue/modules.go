@@ -105,7 +105,11 @@ func resolveLocalModules(ctx context.Context, dir string, modules []string) ([]s
 				errQueue,
 			)
 
-			return nil, fmt.Errorf("%w: module %s resolves outside Configs", errQueue, module)
+			return nil, fmt.Errorf(
+				"%w: module %s resolves outside the deployment repository",
+				errQueue,
+				module,
+			)
 		}
 
 		pending = append(pending, resolved)

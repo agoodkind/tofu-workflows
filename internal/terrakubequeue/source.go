@@ -27,7 +27,7 @@ const (
 	gitRepositorySuffix = ".git"
 )
 
-// gitSource finds reviewed changes for one workspace. It reads Configs main
+// gitSource finds reviewed changes for one workspace. It reads the main branch
 // for merge order and the promotion branch for the last claimed commit.
 type gitSource struct {
 	Directory        string
@@ -136,7 +136,7 @@ func (g gitSource) nextCommit(ctx context.Context, current string) (string, erro
 			)
 
 			return "", fmt.Errorf(
-				"%w: promotion %s is outside Configs main first-parent history",
+				"%w: promotion %s is outside main's first-parent history",
 				errQueue,
 				current,
 			)
@@ -185,7 +185,7 @@ func (g gitSource) promote(ctx context.Context, current, next string) error {
 
 	urls := remote.Config().URLs
 	if len(urls) != 1 {
-		return fmt.Errorf("%w: expected a single Configs origin", errQueue)
+		return fmt.Errorf("%w: expected a single Git origin", errQueue)
 	}
 
 	ref := plumbing.NewBranchReferenceName(g.Branch)
