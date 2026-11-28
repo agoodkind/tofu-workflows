@@ -1,0 +1,28 @@
+name: Publish Tack release pins
+description: Create or reconcile a signed Configs pull request for a successful Tack release.
+inputs:
+  publisher-token:
+    description: Configs App installation token with Contents and Pull requests write access.
+    required: true
+  publisher-slug:
+    description: Configs release publisher App slug from the token creation step.
+    required: true
+  reporter-app-id:
+    description: Numeric GitHub App ID required to report Terrakube plan.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: ${{ github.action_path }}/../../../go.mod
+        cache: false
+    - name: Publish or reconcile the Configs release PR
+      shell: bash
+      env:
+        CONFIGS_PUBLISHER_TOKEN: ${{ inputs.publisher-token }}
+        PUBLISHER_SLUG: ${{ inputs.publisher-slug }}
+        REPORTER_APP_ID: ${{ inputs.reporter-app-id }}
+      run: |
+        go -C "${GITHUB_ACTION_PATH}/../../.." run ./cmd/tack-release \
+          --publisher-slug "${PUBLISHER_SLUG}" --reporter-app-id "${REPORTER_APP_ID}"
